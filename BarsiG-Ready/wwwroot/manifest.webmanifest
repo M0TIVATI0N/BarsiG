@@ -1,0 +1,21 @@
+{
+  "name": "BarsiG — Digital Banking Simulator",
+  "short_name": "BarsiG",
+  "description": "A virtual digital banking simulator.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4EFE6",
+  "theme_color": "#1B2250",
+  "lang": "en",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
