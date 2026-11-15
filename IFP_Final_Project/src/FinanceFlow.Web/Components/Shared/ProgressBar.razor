@@ -1,0 +1,45 @@
+@*
+    A progress bar with an optional label. The value is a number between zero and one.
+*@
+@using System.Globalization
+
+<div class="progress">
+    @if (!string.IsNullOrWhiteSpace(Label))
+    {
+        <div class="progress-head">
+            <span class="progress-label">@Label</span>
+            <span class="progress-value">@ValueText</span>
+        </div>
+    }
+
+    <div class="progress-track" role="progressbar" aria-valuenow="@((int)(Clamped * 100))"
+         aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar" style="width:@(Percent);background:@Color;"></div>
+    </div>
+</div>
+
+@code {
+    /// <summary>The filled part of the bar, a number between zero and one.</summary>
+    [Parameter]
+    public double Value { get; set; }
+
+    /// <summary>The optional label above the bar.</summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>The optional text on the right side of the label.</summary>
+    [Parameter]
+    public string? ValueText { get; set; }
+
+    /// <summary>The colour of the filled part.</summary>
+    [Parameter]
+    public string Color { get; set; } = "var(--accent)";
+
+    /// <summary>Additional CSS classes of the bar.</summary>
+    [Parameter]
+    public string? CssClass { get; set; }
+
+    private double Clamped => Math.Clamp(double.IsNaN(Value) ? 0d : Value, 0d, 1d);
+
+    private string Percent => (Clamped * 100d).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+}

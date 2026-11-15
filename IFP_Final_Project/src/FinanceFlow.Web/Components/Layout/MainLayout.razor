@@ -1,0 +1,193 @@
+﻿@inherits LayoutComponentBase
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Routing
+@implements IDisposable
+@inject ThemeState ThemeState
+@inject SessionState SessionState
+@inject ToastService ToastService
+@inject RealtimeService Realtime
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<CascadingValue TValue="SessionInfo" Value="SessionState.State" IsFixed="true">
+    <div class="app-shell @ThemeClass @(SidebarOpen ? "sidebar-open" : string.Empty)">
+
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-text">
+                    <span class="brand-name">BarsiG</span>
+                    <span class="brand-subtitle">Digital Banking Simulator</span>
+                </span>
+            </div>
+
+            <NavMenu OnNavigated="CloseSidebar" />
+
+            <div class="sidebar-footer">
+                <p class="sidebar-note">Virtual money only — university simulation</p>
+            </div>
+        </aside>
+
+        <div class="app-body">
+            <header class="topbar">
+                <button type="button" class="menu-toggle" title="Menu" @onclick="ToggleSidebar">
+                    <AppIcon Name="list" />
+                </button>
+
+                <div class="topbar-title">
+                    <span class="topbar-page">@PageTitle</span>
+                </div>
+
+                <div class="topbar-actions">
+                    <button type="button" class="icon-btn" title="Change the theme" @onclick="ToggleThemeAsync">
+                        <AppIcon Name="@(ThemeState.State == ThemeMode.Dark ? "sun" : "moon")" />
+                    </button>
+
+                    <UserMenu />
+                </div>
+            </header>
+
+            <main class="content">
+                @Body
+            </main>
+        </div>
+
+        <StateCascadingValue TState="IReadOnlyList<ToastMessage>" TValue="IReadOnlyList<ToastMessage>" Container="ToastService">
+            <ToastHost />
+        </StateCascadingValue>
+
+        <div class="sidebar-overlay" @onclick="CloseSidebar"></div>
+    </div>
+</CascadingValue>
+
+@code {
+    private bool SidebarOpen { get; set; }
+
+    private string ThemeClass => ThemeState.State == ThemeMode.Dark ? "theme-dark" : "theme-light";
+
+    /// <summary>The name of the page that is open, shown in the header of the window.</summary>
+    private string PageTitle { get; set; } = "Digital Banking Simulator";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+
+        PageTitle = DescribeSection(Navigation.Uri);
+
+        await RestoreSessionAsync();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        PageTitle = DescribeSection(e.Location);
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Turns the address of the page into a short name for the header.</summary>
+    private static string DescribeSection(string uri)
+    {
+        string path = new Uri(uri).AbsolutePath.Trim('/');
+
+        if (path.Length == 0)
+        {
+            return "Digital Banking Simulator";
+        }
+
+        string segment = path.Split('/')[0];
+
+        return segment switch
+        {
+            "accounts" or "transfers" or "deposits" or "cards" => "Banking",
+            "transactions" or "categories" or "budgets" or "goals" => "Planning",
+            "analytics" or "forecast" or "insights" => "Analytics",
+            "security" or "export" => "Account",
+            "admin" => "Demo Bank",
+            "login" or "register" => "Welcome to BarsiG",
+            _ => "Personal finance"
+        };
+    }
+
+    private async Task RestoreSessionAsync()
+    {
+        if (SessionState.State.IsAuthenticated)
+        {
+            return;
+        }
+
+        AuthenticationState state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+
+        string? identifier = state.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!Guid.TryParse(identifier, out Guid userId))
+        {
+            return;
+        }
+
+        string displayName = state.User.FindFirstValue(ClaimTypes.Name) ?? "User";
+        string email = state.User.FindFirstValue(ClaimTypes.Email) ?? string.Empty;
+        string role = state.User.FindFirstValue(ClaimTypes.Role) ?? "User";
+
+        SessionState.SignIn(new UserSession(userId, email, displayName, role));
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await Realtime.StartAsync();
+
+        try
+        {
+            await JS.InvokeVoidAsync("financeFlow.markReady");
+        }
+        catch (JSException)
+        {
+            // The flag is only used by the automated tests.
+        }
+
+        try
+        {
+            string stored = await JS.InvokeAsync<string>("financeFlow.getStoredTheme");
+
+            if (string.Equals(stored, "dark", StringComparison.OrdinalIgnoreCase))
+            {
+                ThemeState.Apply(ThemeMode.Dark);
+            }
+
+            await JS.InvokeVoidAsync("financeFlow.applyTheme", ThemeState.State == ThemeMode.Dark ? "dark" : "light");
+        }
+        catch (JSException)
+        {
+            // The browser storage is not available, the light theme stays active.
+        }
+    }
+
+    private async Task ToggleThemeAsync()
+    {
+        ThemeState.Toggle();
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "financeFlow.applyTheme",
+                ThemeState.State == ThemeMode.Dark ? "dark" : "light");
+        }
+        catch (JSException)
+        {
+            // The browser storage is not available, the theme still changes for this session.
+        }
+    }
+
+    private void ToggleSidebar() => SidebarOpen = !SidebarOpen;
+
+    private void CloseSidebar() => SidebarOpen = false;
+
+    /// <inheritdoc />
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}

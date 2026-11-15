@@ -1,0 +1,14 @@
+@inject NavigationManager Navigation
+
+@*
+    Sends an anonymous visitor to the sign in page and remembers where the visitor wanted to go.
+*@
+
+@code {
+    /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        string returnUrl = new Uri(Navigation.Uri).PathAndQuery;
+        Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
+    }
+}

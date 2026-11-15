@@ -1,0 +1,44 @@
+@typeparam TState
+@typeparam TValue
+@implements IDisposable
+
+@*
+    Publishes a state container to the component tree with a cascading value.
+    The value is not fixed, therefore every change of the container re-renders the children.
+*@
+
+<CascadingValue TValue="TValue" Value="CurrentValue" IsFixed="false">
+    @ChildContent
+</CascadingValue>
+
+@code {
+    /// <summary>The container that holds the state.</summary>
+    [Parameter]
+    public StateContainer<TState> Container { get; set; } = default!;
+
+    /// <summary>The content that receives the cascading value.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private TValue CurrentValue => Container is null ? default! : (TValue)(object)Container.State!;
+
+    protected override void OnInitialized()
+    {
+        if (Container is not null)
+        {
+            Container.PropertyChanged += OnContainerChanged;
+        }
+    }
+
+    private void OnContainerChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) =>
+        InvokeAsync(StateHasChanged);
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (Container is not null)
+        {
+            Container.PropertyChanged -= OnContainerChanged;
+        }
+    }
+}

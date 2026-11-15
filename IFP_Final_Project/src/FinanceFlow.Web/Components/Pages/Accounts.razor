@@ -1,0 +1,161 @@
+@page "/accounts"
+@attribute [Authorize]
+@inject FinanceFlow.Application.Banking.AccountService AccountService
+@inject UserContext UserContext
+@inject ToastService ToastService
+
+<PageTitle>Accounts · BarsiG</PageTitle>
+
+<PageHeader Title="My accounts" Subtitle="Balances from the virtual bank ledger, separate from personal-finance tracking.">
+    <Actions>
+        <button type="button" class="btn btn-ghost btn-sm" @onclick="ReloadAsync">
+            <AppIcon Name="chart" /> Refresh
+        </button>
+    </Actions>
+</PageHeader>
+
+@if (_loading)
+{
+    <p class="page-loading">Loading the accounts…</p>
+}
+else
+{
+    <section class="stat-grid accounts-summary">
+        <article class="stat-card">
+            <div class="stat-body">
+                <div class="stat-label">Total ledger balance</div>
+                <div class="stat-value">@_total.Format()</div>
+                <div class="stat-hint">Combined primary and deposit balances</div>
+            </div>
+        </article>
+
+        <article class="stat-card">
+            <div class="stat-body">
+                <div class="stat-label">Accounts</div>
+                <div class="stat-value">@_accounts.Count</div>
+                <div class="stat-hint">Primary account and savings deposits</div>
+            </div>
+        </article>
+
+        <article class="stat-card">
+            <div class="stat-body">
+                <div class="stat-label">Currency</div>
+                <div class="stat-value">KZT</div>
+                <div class="stat-hint">Kazakhstani tenge · virtual ledger</div>
+            </div>
+        </article>
+    </section>
+
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">The accounts</h2>
+                <span class="card-hint">Double-entry banking ledger</span>
+            </header>
+
+            @if (_accounts.Count == 0)
+            {
+                <EmptyState Icon="bank" Title="No accounts yet"
+                            Message="The primary account of BarsiG appears here as soon as it is created." />
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (AccountSummary account in _accounts)
+                    {
+                        <li class="list-item">
+                            <div>
+                                <div class="list-value">@account.DisplayName</div>
+                                <div class="list-meta">@account.AccountNumber · @Describe(account.Type)</div>
+                            </div>
+                            <div class="money">@account.Balance.Format()</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </article>
+
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">The last movements</h2>
+                <span class="card-hint">Double entry ledger</span>
+            </header>
+
+            @if (_history.Count == 0)
+            {
+                <EmptyState Icon="list" Title="No movements yet"
+                            Message="Every transfer of BarsiG appears here with the balance after the movement." />
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Movement</th>
+                                <th>Counterparty</th>
+                                <th class="text-right">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (LedgerMovementItem movement in _history)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="list-value">@DescribeMovement(movement.Kind)</div>
+                                        <div class="list-meta">@movement.OccurredAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                                    </td>
+                                    <td>@movement.CounterpartyName</td>
+                                    <td class="text-right money @(movement.Direction == LedgerEntryDirection.Credit ? "income" : "")">
+                                        @(movement.Direction == LedgerEntryDirection.Credit ? "+" : "−")@movement.Amount.Format()
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </article>
+    </section>
+}
+
+@code {
+    private IReadOnlyList<AccountSummary> _accounts = [];
+    private IReadOnlyList<LedgerMovementItem> _history = [];
+    private Money _total = Money.Zero;
+    private bool _loading = true;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        _accounts = await AccountService.GetAccountsAsync(userId);
+        _total = await AccountService.GetTotalBalanceAsync(userId);
+        _history = await AccountService.GetHistoryAsync(userId, 20);
+
+        _loading = false;
+    }
+
+    private static string Describe(BankAccountType type) => type switch
+    {
+        BankAccountType.Primary => "Primary account",
+        BankAccountType.Deposit => "Savings deposit",
+        BankAccountType.Reserve => "Reserve of the Demo Bank",
+        _ => "System account"
+    };
+
+    private static string DescribeMovement(LedgerTransferKind kind) => kind switch
+    {
+        LedgerTransferKind.UserTransfer => "Transfer",
+        LedgerTransferKind.AdminFunding => "Funding of the Demo Bank",
+        LedgerTransferKind.DepositContribution => "Contribution to a deposit",
+        LedgerTransferKind.DepositWithdrawal => "Withdrawal from a deposit",
+        LedgerTransferKind.InterestAccrual => "Monthly interest",
+        _ => "Movement"
+    };
+}

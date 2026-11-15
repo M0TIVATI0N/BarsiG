@@ -1,0 +1,56 @@
+@inject SessionState SessionState
+
+<div class="user-menu">
+    <AuthorizeView>
+        <Authorized>
+            <div class="user-chip" title="@DisplayName">
+                <span class="avatar">@Initials</span>
+                <span class="user-name">@DisplayName</span>
+            </div>
+
+            <form method="post" action="/logout" class="logout-form">
+                <button type="submit" class="btn btn-ghost btn-sm" title="Sign out">
+                    <AppIcon Name="logout" />
+                    <span class="user-action-text">Sign out</span>
+                </button>
+            </form>
+        </Authorized>
+
+        <NotAuthorized>
+            <a class="btn btn-primary btn-sm" href="/login">Sign in</a>
+        </NotAuthorized>
+    </AuthorizeView>
+</div>
+
+@code {
+    /// <summary>
+    /// The session arrives as a cascading value, so the component is re-rendered
+    /// when the session changes.
+    /// </summary>
+    [CascadingParameter]
+    private SessionInfo? Session { get; set; }
+
+    private string DisplayName => Session?.DisplayName ?? SessionState.State.DisplayName;
+
+    private string Initials
+    {
+        get
+        {
+            string name = DisplayName.Trim();
+
+            if (name.Length == 0)
+            {
+                return "?";
+            }
+
+            string[] parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            return parts.Length switch
+            {
+                0 => "?",
+                1 => parts[0][..1].ToUpperInvariant(),
+                _ => $"{parts[0][..1]}{parts[^1][..1]}".ToUpperInvariant()
+            };
+        }
+    }
+}

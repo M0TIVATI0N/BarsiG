@@ -1,0 +1,199 @@
+@*
+    The form that creates or edits a transaction.
+    The component only collects the input, the business rules live in the application layer.
+*@
+
+@if (Visible)
+{
+    <section class="card editor-card">
+        <header class="card-header">
+            <h2 class="card-title">@Title</h2>
+            <button type="button" class="icon-btn" title="Close" @onclick="CancelAsync">
+                <AppIcon Name="close" />
+            </button>
+        </header>
+
+        <EditForm Model="Input" OnValidSubmit="SaveAsync" class="form-stack">
+            <div class="form-grid">
+                <div class="field">
+                    <label class="field-label" for="editor-amount">Amount</label>
+                    <InputNumber id="editor-amount" class="input" @bind-Value="Input.Amount" step="0.01" />
+                    @if (_error is not null)
+                    {
+                        <span class="field-error">@_error</span>
+                    }
+                </div>
+
+                <div class="field">
+                    <label class="field-label" for="editor-kind">Type</label>
+                    <InputSelect id="editor-kind" class="input" @bind-Value="Input.Kind" @bind-Value:after="OnKindChanged">
+                        <option value="@TransactionKind.Expense">Expense</option>
+                        <option value="@TransactionKind.Income">Income</option>
+                    </InputSelect>
+                </div>
+
+                <div class="field">
+                    <label class="field-label" for="editor-category">Category</label>
+                    <InputSelect id="editor-category" class="input" @bind-Value="Input.CategoryId">
+                        @if (!AvailableCategories.Any())
+                        {
+                            <option value="@Guid.Empty">No category available</option>
+                        }
+                        @foreach (CategoryItem category in AvailableCategories)
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+
+                <div class="field">
+                    <label class="field-label" for="editor-date">Date</label>
+                    <InputDate id="editor-date" class="input" @bind-Value="Input.Date" />
+                </div>
+
+                <div class="field field-wide">
+                    <label class="field-label" for="editor-note">Note</label>
+                    <InputText id="editor-note" class="input" @bind-Value="Input.Note" placeholder="Optional" />
+                </div>
+            </div>
+
+            <div class="editor-actions">
+                <button type="button" class="btn btn-ghost" @onclick="CancelAsync">Cancel</button>
+                <button type="submit" class="btn btn-primary">@SubmitText</button>
+            </div>
+        </EditForm>
+    </section>
+}
+
+@code {
+    /// <summary>The model of the editor form.</summary>
+    public sealed class EditorInput
+    {
+        /// <summary>The amount of the transaction.</summary>
+        public decimal Amount { get; set; }
+
+        /// <summary>The direction of the transaction.</summary>
+        public TransactionKind Kind { get; set; } = TransactionKind.Expense;
+
+        /// <summary>The selected category.</summary>
+        public Guid CategoryId { get; set; }
+
+        /// <summary>The day of the transaction.</summary>
+        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Now);
+
+        /// <summary>The optional note.</summary>
+        public string? Note { get; set; }
+    }
+
+    /// <summary>Shows or hides the editor.</summary>
+    [Parameter]
+    public bool Visible { get; set; }
+
+    /// <summary>The transaction that is edited, or <c>null</c> when a new one is created.</summary>
+    [Parameter]
+    public TransactionItem? Transaction { get; set; }
+
+    /// <summary>All categories of the user.</summary>
+    [Parameter]
+    public IReadOnlyList<CategoryItem> Categories { get; set; } = [];
+
+    /// <summary>Raised after the transaction was saved.</summary>
+    [Parameter]
+    public EventCallback OnSaved { get; set; }
+
+    /// <summary>Raised when the user closes the editor.</summary>
+    [Parameter]
+    public EventCallback OnCancelled { get; set; }
+
+    [Inject]
+    private TransactionService TransactionService { get; set; } = default!;
+
+    [Inject]
+    private UserContext UserContext { get; set; } = default!;
+
+    [Inject]
+    private ToastService ToastService { get; set; } = default!;
+
+    private EditorInput Input { get; set; } = new();
+
+    private string? _error;
+
+    private string Title => Transaction is null ? "New transaction" : "Edit the transaction";
+
+    private string SubmitText => Transaction is null ? "Add the transaction" : "Save the changes";
+
+    private IReadOnlyList<CategoryItem> AvailableCategories =>
+        Categories.Where(category => category.Kind == Input.Kind).ToList();
+
+    /// <inheritdoc />
+    protected override void OnParametersSet()
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        if (Transaction is null)
+        {
+            Input = new EditorInput
+            {
+                Amount = 0m,
+                Kind = TransactionKind.Expense,
+                Date = DateOnly.FromDateTime(DateTime.UtcNow),
+                CategoryId = AvailableCategories.FirstOrDefault()?.Id ?? Guid.Empty
+            };
+        }
+        else
+        {
+            Input = new EditorInput
+            {
+                Amount = Transaction.Amount.ToDecimal(),
+                Kind = Transaction.Kind,
+                CategoryId = Transaction.CategoryId,
+                Date = Transaction.OccurredOn,
+                Note = Transaction.Note
+            };
+        }
+
+        _error = null;
+    }
+
+    private void OnKindChanged()
+    {
+        if (!AvailableCategories.Any(category => category.Id == Input.CategoryId))
+        {
+            Input.CategoryId = AvailableCategories.FirstOrDefault()?.Id ?? Guid.Empty;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        var draft = new TransactionDraft(
+            userId,
+            Input.CategoryId,
+            Input.Amount,
+            Input.Kind,
+            Input.Date,
+            Input.Note);
+
+        Result<TransactionItem> result = Transaction is null
+            ? await TransactionService.CreateAsync(userId, draft)
+            : await TransactionService.UpdateAsync(userId, Transaction.Id, draft);
+
+        if (result is not Ok<TransactionItem> ok)
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success(
+            Transaction is null ? "Transaction added" : "Transaction updated",
+            $"{ok.Value.CategoryName}: {ok.Value.Amount.Format()}");
+
+        await OnSaved.InvokeAsync();
+    }
+
+    private Task CancelAsync() => OnCancelled.InvokeAsync();
+}

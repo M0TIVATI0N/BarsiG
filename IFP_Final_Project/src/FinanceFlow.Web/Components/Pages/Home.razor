@@ -1,0 +1,279 @@
+@page "/"
+@attribute [Authorize]
+@implements IDisposable
+@inject DashboardService DashboardService
+@inject UserContext UserContext
+@inject RealtimeService Realtime
+@inject ToastService ToastService
+
+<PageTitle>Dashboard · BarsiG</PageTitle>
+
+<PageHeader Title="Dashboard" Subtitle="An overview of your money for the last six months.">
+    <Actions>
+        <a class="btn btn-primary" href="/transfers">
+            <AppIcon Name="send" />
+            <span>New transfer</span>
+        </a>
+
+        <a class="btn btn-ghost" href="/transactions">
+            <AppIcon Name="plus" />
+            <span>Add a transaction</span>
+        </a>
+    </Actions>
+</PageHeader>
+
+<div class="dashboard-banner">
+    <img src="img/BarsiG_Dashboard_Banner.png" alt="BarsiG — Digital Banking Simulator" />
+</div>
+
+@if (_summary is null)
+{
+    <div class="page-loading">
+        <div class="spinner"></div>
+        <p>Loading your finances…</p>
+    </div>
+}
+else
+{
+    <section class="stat-grid dashboard-kpis">
+        <StatCard Label="Current balance" Value="@_summary.Balance.Format()" Icon="wallet" Accent="var(--navy-gold)"
+                  Hint="@($"{_summary.TransactionCount} transactions in total")" />
+
+        <StatCard Label="Income" Value="@_summary.Income.Format()" Icon="trend" Accent="var(--navy-gold)"
+                  Hint="All recorded income" />
+
+        <StatCard Label="Expenses" Value="@_summary.Expense.Format()" Icon="cart" Accent="var(--navy-gold)"
+                  Hint="@($"{_summary.SpentThisMonth.Format()} in the current month")" />
+
+        <StatCard Label="Savings rate" Value="@($"{_summary.SavingsRate:P0}")" Icon="target" Accent="var(--navy-gold)"
+                  Hint="The share of the income that was kept" />
+    </section>
+
+    <section class="grid-2 dashboard-chart-row">
+        <article class="card dashboard-chart-card">
+            <header class="card-header">
+                <h2 class="card-title">Income and expenses</h2>
+                <span class="card-hint">Last six months</span>
+            </header>
+
+            <BarChart Groups="@BuildGroups(_summary.MonthlyHistory)"
+                      Labels="@_summary.MonthlyHistory.Select(point => MonthLabel(point.Month)).ToList()"
+                     PrimaryColor="var(--chart-income)"
+                     SecondaryColor="var(--chart-expense)"
+                     AriaLabel="Income and expenses of every month" />
+        </article>
+
+        <article class="card dashboard-chart-card">
+            <header class="card-header">
+                <h2 class="card-title">Where the money goes</h2>
+                <span class="card-hint">Share of the expenses</span>
+            </header>
+
+            @if (_summary.TopExpenseCategories.Count == 0)
+            {
+                <EmptyState Icon="chart" Title="No expenses yet"
+                            Message="Add a few transactions and the breakdown will appear here." />
+            }
+            else
+            {
+                <div class="donut-layout">
+                    <DonutChart Segments="@_expenseSegments"
+                                CenterLabel="@_summary.Expense.Format()"
+                                CenterCaption="expenses" />
+
+                    <ul class="legend">
+                        @foreach ((CategoryBreakdown item, int index) in _summary.TopExpenseCategories.Take(6).Select((item, index) => (item, index)))
+                        {
+                            <li class="legend-item">
+                                <span class="legend-dot" style="background:@ChartPalette.ForIndex(index);"></span>
+                                <span class="legend-name">@item.Name</span>
+                                <span class="legend-value">@item.Share.ToString("P0")</span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </article>
+    </section>
+
+    <section class="grid-2 dashboard-mid-row">
+        <article class="card dashboard-mid-card">
+            <header class="card-header">
+                <h2 class="card-title">Budgets</h2>
+                <a class="card-link" href="/budgets">Manage</a>
+            </header>
+
+            @if (_summary.Budgets.Count == 0)
+            {
+                <EmptyState Icon="wallet" Title="No budgets for this month"
+                            Message="Set a limit for a category and the dashboard will follow it." />
+            }
+            else
+            {
+                <ul class="budget-list">
+                    @foreach (BudgetStatus budget in _summary.Budgets)
+                    {
+                        <li class="budget-item">
+                            <div class="budget-head">
+                                <span class="budget-name">@budget.CategoryName</span>
+                                <span class="budget-amount">@budget.Spent.Format() / @budget.Limit.Format()</span>
+                            </div>
+                            <ProgressBar Value="@budget.Ratio" Color="@UsageColor(budget.Usage)" />
+                        </li>
+                    }
+                </ul>
+            }
+        </article>
+
+        <article class="card dashboard-mid-card">
+            <header class="card-header">
+                <h2 class="card-title">Smart insights</h2>
+                <a class="card-link" href="/insights">All insights</a>
+            </header>
+
+            @if (_summary.Insights.Count == 0)
+            {
+                <EmptyState Icon="bulb" Title="No insights yet"
+                            Message="The engine needs a bit more data before it can give advice." />
+            }
+            else
+            {
+                <ul class="insight-list">
+                    @foreach (Insight insight in _summary.Insights.Take(4))
+                    {
+                        <li class="insight insight-@insight.Severity.ToString().ToLowerInvariant()">
+                            <AppIcon Name="@InsightIcon(insight.Kind)" CssClass="insight-icon" />
+                            <div>
+                                <strong class="insight-title">@insight.Title</strong>
+                                <span class="insight-text">@insight.Description</span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </article>
+    </section>
+
+    <section class="grid-2 dashboard-bottom-row">
+        <article class="card dashboard-bottom-card">
+            <header class="card-header">
+                <h2 class="card-title">Recent transactions</h2>
+                <a class="card-link" href="/transactions">See all</a>
+            </header>
+
+            @if (_summary.RecentTransactions.Count == 0)
+            {
+                <EmptyState Icon="list" Title="Nothing recorded yet" />
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (TransactionItem item in _summary.RecentTransactions.Take(5))
+                    {
+                        <li class="list-item">
+                            <CategoryBadge Name="@item.CategoryName" Color="@item.ColorHex" Icon="@item.Icon" />
+                            <span class="list-meta">@item.OccurredOn.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)</span>
+                            <MoneyText Amount="@item.Amount" Kind="@item.Kind" CssClass="list-value" />
+                        </li>
+                    }
+                </ul>
+            }
+        </article>
+
+        <article class="card dashboard-bottom-card">
+            <header class="card-header">
+                <h2 class="card-title">Savings goals</h2>
+                <a class="card-link" href="/goals">Manage</a>
+            </header>
+
+            @if (_summary.Goals.Count == 0)
+            {
+                <EmptyState Icon="target" Title="No goals yet"
+                            Message="A goal turns a wish into a plan." />
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (GoalItem goal in _summary.Goals)
+                    {
+                        <li class="goal-item">
+                            <div class="goal-head">
+                                <span class="goal-title">@goal.Title</span>
+                                <span class="goal-amount">@goal.Saved.Format() / @goal.Target.Format()</span>
+                            </div>
+                            <ProgressBar Value="@goal.Ratio" Color="var(--accent)" />
+                            @if (goal.DaysLeft is { } days)
+                            {
+                                <span class="goal-hint">@(days >= 0 ? $"{days} days left" : "The date has passed")</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </article>
+    </section>
+}
+
+@code {
+    private DashboardSummary? _summary;
+
+    private List<DonutChart.Segment> _expenseSegments => _summary is null
+        ? []
+        : _summary.TopExpenseCategories
+            .Select((item, index) => new DonutChart.Segment(item.Name, item.Share, ChartPalette.ForIndex(index)))
+            .ToList();
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Realtime.DataChanged += OnDataChangedAsync;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+        _summary = await DashboardService.GetAsync(userId);
+    }
+
+    private async Task OnDataChangedAsync(string entity, string action)
+    {
+        if (entity is not ("transactions" or "budgets" or "goals" or "categories"))
+        {
+            return;
+        }
+
+        Guid userId = await UserContext.GetUserIdAsync();
+        _summary = await DashboardService.GetAsync(userId);
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static List<BarChart.BarGroup> BuildGroups(IReadOnlyList<MonthlyPoint> history) =>
+        history
+            .Select(point => new BarChart.BarGroup((double)point.Income.ToDecimal(), (double)point.Expense.ToDecimal()))
+            .ToList();
+
+    private static string MonthLabel(string month) =>
+        DateTime.ParseExact(month, "yyyy-MM", CultureInfo.InvariantCulture)
+            .ToString("MMM", CultureInfo.InvariantCulture);
+
+    private static string UsageColor(BudgetUsage usage) => usage switch
+    {
+        BudgetUsage.Exceeded => "var(--danger)",
+        BudgetUsage.AlmostReached => "var(--warning)",
+        _ => "var(--accent)"
+    };
+
+    private static string InsightIcon(InsightKind kind) => kind switch
+    {
+        InsightKind.Budget => "wallet",
+        InsightKind.Anomaly => "alert",
+        InsightKind.Goal => "target",
+        InsightKind.Distribution => "chart",
+        InsightKind.Positive => "check",
+        _ => "trend"
+    };
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Realtime.DataChanged -= OnDataChangedAsync;
+    }
+}

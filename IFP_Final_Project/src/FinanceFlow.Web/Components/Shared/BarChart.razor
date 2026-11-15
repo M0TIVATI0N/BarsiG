@@ -1,0 +1,96 @@
+@*
+    A grouped bar chart that compares income and expense of every month.
+*@
+
+<div class="chart">
+    <svg class="chart-svg" viewBox="@($"0 0 {Width} {Height}")" preserveAspectRatio="none"
+         role="img" aria-label="@AriaLabel">
+        @if (ShowGrid)
+        {
+            @for (int line = 0; line <= 4; line++)
+            {
+                double y = (Height / 4d) * line;
+                <line class="chart-grid-line" x1="0" x2="@Width" y1="@ChartGeometry.Number(y)" y2="@ChartGeometry.Number(y)" />
+            }
+        }
+
+        @for (int index = 0; index < Groups.Count; index++)
+        {
+            double groupWidth = UsableWidth / Math.Max(Groups.Count, 1);
+            double barWidth = Math.Max((groupWidth - 12d) / 2d, 2d);
+            double x = PaddingLeft + (groupWidth * index) + 6d;
+
+            <rect class="chart-bar" x="@ChartGeometry.Number(x)" y="@ChartGeometry.Number(ScaleY(Groups[index].Primary))"
+                  width="@ChartGeometry.Number(barWidth)" height="@ChartGeometry.Number(Math.Max(Baseline - ScaleY(Groups[index].Primary), 0d))"
+                  rx="4" style="fill:@PrimaryColor" opacity="0.9" />
+
+            <rect class="chart-bar" x="@ChartGeometry.Number(x + barWidth + 4d)" y="@ChartGeometry.Number(ScaleY(Groups[index].Secondary))"
+                  width="@ChartGeometry.Number(barWidth)" height="@ChartGeometry.Number(Math.Max(Baseline - ScaleY(Groups[index].Secondary), 0d))"
+                  rx="4" style="fill:@SecondaryColor" opacity="0.9" />
+        }
+    </svg>
+
+    @if (Labels.Count > 0)
+    {
+        <div class="chart-labels">
+            @foreach (string label in Labels)
+            {
+                <span class="chart-label">@label</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>One group of two bars.</summary>
+    /// <param name="Primary">The height of the first bar.</param>
+    /// <param name="Secondary">The height of the second bar.</param>
+    public readonly record struct BarGroup(double Primary, double Secondary);
+
+    /// <summary>The groups of the chart.</summary>
+    [Parameter]
+    public IReadOnlyList<BarGroup> Groups { get; set; } = [];
+
+    /// <summary>The optional labels under the chart.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Labels { get; set; } = [];
+
+    /// <summary>The colour of the first bar of every group.</summary>
+    [Parameter]
+    public string PrimaryColor { get; set; } = "var(--chart-income)";
+
+    /// <summary>The colour of the second bar of every group.</summary>
+    [Parameter]
+    public string SecondaryColor { get; set; } = "var(--chart-expense)";
+
+    /// <summary>The width of the drawing area in SVG units.</summary>
+    [Parameter]
+    public int Width { get; set; } = 720;
+
+    /// <summary>The height of the drawing area in SVG units.</summary>
+    [Parameter]
+    public int Height { get; set; } = 240;
+
+    /// <summary>Draws the horizontal helper lines.</summary>
+    [Parameter]
+    public bool ShowGrid { get; set; } = true;
+
+    /// <summary>The accessible description of the chart.</summary>
+    [Parameter]
+    public string AriaLabel { get; set; } = "Bar chart";
+
+    private const double PaddingLeft = 8d;
+    private const double PaddingRight = 8d;
+    private const double PaddingTop = 12d;
+    private const double PaddingBottom = 12d;
+
+    private double UsableWidth => Width - PaddingLeft - PaddingRight;
+
+    private double Baseline => Height - PaddingBottom;
+
+    private double MaxValue => Groups.Count == 0
+        ? 1d
+        : Math.Max(1d, Groups.Max(group => Math.Max(group.Primary, group.Secondary)));
+
+    private double ScaleY(double value) => Baseline - ((value / MaxValue) * (Baseline - PaddingTop));
+}

@@ -1,0 +1,118 @@
+@page "/login"
+@layout EmptyLayout
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Environment
+
+<PageTitle>Sign in · BarsiG</PageTitle>
+
+<div class="auth-shell">
+    <section class="auth-card">
+        <div class="auth-brand">
+            <img class="brand-logo" src="img/BarsiG_App_Icon.png" alt="BarsiG" />
+            <span class="brand-text">
+                <span class="brand-name">BarsiG</span>
+                <span class="brand-subtitle">Digital Banking Simulator</span>
+            </span>
+        </div>
+
+        <h1 class="auth-title">Welcome back</h1>
+        <p class="auth-subtitle">Sign in to see your balance, budgets and insights.</p>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="alert alert-error" role="alert">@_error</div>
+        }
+
+        <EditForm Model="Input" OnValidSubmit="SignInAsync" FormName="sign-in" class="form-stack">
+            <div class="field">
+                <label class="field-label" for="login-identifier">Email or phone number</label>
+                <InputText id="login-identifier" class="input" @bind-Value="Input.Identifier" autocomplete="username" disabled="@(!_interactiveReady || _busy)" />
+                <ValidationMessage For="() => Input.Identifier" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="login-password">Password</label>
+                <InputText id="login-password" class="input" type="password" @bind-Value="Input.Password" autocomplete="current-password" disabled="@(!_interactiveReady || _busy)" />
+                <ValidationMessage For="() => Input.Password" />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block" disabled="@(!_interactiveReady || _busy)">
+                @(!_interactiveReady ? "Loading…" : _busy ? "Signing in…" : "Sign in")
+            </button>
+        </EditForm>
+
+        <p class="auth-footer">
+            No account yet? <a href="/register">Create one</a>
+        </p>
+
+        @if (FinanceFlow.Web.LocalPhoneVerification.IsDemoModeEnabled(
+                Environment.EnvironmentName,
+                string.Equals(Configuration["PhoneVerification:EnableLocalDemo"], "true", StringComparison.OrdinalIgnoreCase)) &&
+                string.Equals(Configuration["DemoData:EnableSeedAccount"], "true", StringComparison.OrdinalIgnoreCase))
+        {
+            <div class="demo-note">
+                <strong>Local demo mode</strong>
+                <span>Demo account seeding is enabled for this Development environment.</span>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private readonly LoginInput _input = new();
+
+    private string? _error;
+    private bool _busy;
+    private bool _interactiveReady;
+
+    private LoginInput Input => _input;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Static SSR renders the form before the Blazor circuit can handle events.
+            // Keep it disabled until this interactive lifecycle callback runs so a quick
+            // submit after a redirect cannot post an empty server-rendered model.
+            _interactiveReady = true;
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task SignInAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>(
+                "financeFlow.signIn",
+                Input.Identifier,
+                Input.Password);
+
+            if (!response.Ok)
+            {
+                _error = "The e-mail address or the password is wrong.";
+                return;
+            }
+
+            Navigation.NavigateTo(string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl, forceLoad: true);
+        }
+        catch (JSException)
+        {
+            _error = "The server could not be reached. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,0 +1,25 @@
+@*
+    A coloured badge with the name of a category.
+*@
+
+<span class="badge" style="--badge-color:@Color;">
+    @if (!string.IsNullOrWhiteSpace(Icon))
+    {
+        <AppIcon Name="@Icon" CssClass="badge-icon" />
+    }
+    @Name
+</span>
+
+@code {
+    /// <summary>The name of the category.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The colour of the category.</summary>
+    [Parameter]
+    public string Color { get; set; } = "#94A3B8";
+
+    /// <summary>The optional icon of the category.</summary>
+    [Parameter]
+    public string? Icon { get; set; }
+}

@@ -1,0 +1,453 @@
+@page "/security"
+@attribute [Authorize]
+@inject FinanceFlow.Application.Banking.SecurityService SecurityService
+@inject UserContext UserContext
+@inject ToastService ToastService
+@inject IJSRuntime JS
+
+<PageTitle>Security · BarsiG</PageTitle>
+
+<PageHeader Title="Security" Subtitle="Your sessions, the history of the sign ins and the extra confirmation." />
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The sessions of this account</h2>
+            <span class="card-hint">Only the sessions that the server knows</span>
+        </header>
+
+        @if (_overview.Sessions.Count == 0)
+        {
+            <EmptyState Icon="shield" Title="No session yet" Message="The sessions appear after the sign in." />
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (SessionItem session in _overview.Sessions)
+                {
+                    <li class="list-item">
+                        <div>
+                            <div class="list-value">@session.DeviceName</div>
+                            <div class="list-meta">
+                                @session.IpAddress · signed in @session.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                            </div>
+                            <div class="list-meta">
+                                last seen @session.LastSeenAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                            </div>
+                        </div>
+                        @if (session.IsActive)
+                        {
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => TerminateAsync(session)">
+                                Terminate
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="badge">Terminated</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Phone sign-in</h2>
+        </header>
+        <div class="form-stack">
+            <p class="muted">Add or replace the phone used for sign-in. Your password is required again. The replacement is not saved until its local demo code is verified.</p>
+            @if (_phoneChallengeId is null)
+            {
+                <div class="field">
+                    <label class="field-label" for="security-phone">Kazakhstan mobile number</label>
+                    <input id="security-phone" class="input" type="tel" @bind="_phoneNumber" autocomplete="tel" inputmode="tel" placeholder="777 777 77 77" />
+                </div>
+                <div class="field">
+                    <label class="field-label" for="security-phone-password">Confirm your password</label>
+                    <input id="security-phone-password" class="input" type="password" @bind="_phonePassword" autocomplete="current-password" />
+                </div>
+                <button type="button" class="btn btn-primary" @onclick="RequestPhoneChangeAsync">Request local verification</button>
+            }
+            else
+            {
+                <div class="demo-note">
+                    <strong>Demo verification — no SMS is sent.</strong>
+                    <span>This educational code does not prove ownership of a real phone number.</span>
+                    @if (!string.IsNullOrWhiteSpace(_phoneDemoCode))
+                    {
+                        <p class="auth-title" aria-label="Local demo verification code">@_phoneDemoCode</p>
+                    }
+                    else
+                    {
+                        <span>The previous code is not stored. Request a new demo code to continue.</span>
+                    }
+                </div>
+                <div class="field">
+                    <label class="field-label" for="security-phone-code">Verification code</label>
+                    <input id="security-phone-code" class="input" inputmode="numeric" autocomplete="one-time-code" @bind="_phoneCode" />
+                </div>
+                <button type="button" class="btn btn-primary" @onclick="VerifyPhoneChangeAsync">Verify and save phone</button>
+                <button type="button" class="btn btn-ghost" @onclick="ResendPhoneChangeCodeAsync">Request a new demo code</button>
+            }
+            @if (_phoneMessage is not null)
+            {
+                <p class="@(_phoneError ? "field-error" : "muted")" role="status">@_phoneMessage</p>
+            }
+        </div>
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The transaction PIN</h2>
+        </header>
+
+        <div class="form-stack">
+            @if (_overview.HasTransactionPin)
+            {
+                <p class="muted">A transaction PIN is set. Every transfer asks for it.</p>
+            }
+
+            <div class="field">
+                <label class="field-label" for="security-pin">New PIN (4 to 8 digits)</label>
+                <input id="security-pin" class="input" type="password" inputmode="numeric" maxlength="8" @bind="_pin" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="security-password">Your password</label>
+                <input id="security-password" class="input" type="password" @bind="_password" />
+            </div>
+
+            @if (_error is not null)
+            {
+                <p class="field-error">@_error</p>
+            }
+
+            <button type="button" class="btn btn-primary" @onclick="SavePinAsync">Save the PIN</button>
+
+            <p class="muted">
+                The PIN is stored with the same hashing as the password. It is a second secret of the
+                customer, not a second factor of the authentication.
+            </p>
+        </div>
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The history of the sign ins</h2>
+        </header>
+
+        @if (_overview.LoginEvents.Count == 0)
+        {
+            <EmptyState Icon="clock" Title="Nothing recorded yet" Message="Every attempt to sign in is recorded." />
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (LoginEventItem entry in _overview.LoginEvents)
+                {
+                    <li class="list-item">
+                        <div>
+                            <div class="list-value">@Describe(entry.Kind)</div>
+                            <div class="list-meta">
+                                @entry.OccurredAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ·
+                                @entry.DeviceName · @entry.IpAddress
+                            </div>
+                            <div class="list-meta">@entry.Details</div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The authenticator</h2>
+        </header>
+
+        <div class="form-stack">
+            @if (_overview.HasTotp)
+            {
+                <p class="muted">The authenticator is enabled for this account.</p>
+            }
+            else
+            {
+                <p class="muted">
+                    The authenticator creates a code from a secret that only your phone knows.
+                    The code is checked by the server, it never leaves the device.
+                </p>
+            }
+
+            @if (_totpSecret is not null)
+            {
+                <p class="code-block">@_totpSecret</p>
+                <p class="muted">Add this secret to the authenticator of your phone, then confirm the code.</p>
+
+                <div class="field">
+                    <label class="field-label" for="totp-code">The code of the authenticator</label>
+                    <input id="totp-code" class="input" inputmode="numeric" maxlength="6" @bind="_totpCode" />
+                </div>
+
+                <button type="button" class="btn btn-primary" @onclick="VerifyTotpAsync">Confirm the code</button>
+            }
+            else
+            {
+                <div class="field">
+                    <label class="field-label" for="totp-password">Your password</label>
+                    <input id="totp-password" class="input" type="password" @bind="_totpPassword" />
+                </div>
+
+                <button type="button" class="btn btn-primary" @onclick="EnableTotpAsync">Enable the authenticator</button>
+            }
+        </div>
+    </article>
+</section>
+
+@code {
+    private SecurityOverview _overview = new([], [], false, false);
+    private string _pin = string.Empty;
+    private string _password = string.Empty;
+    private string _totpPassword = string.Empty;
+    private string _totpCode = string.Empty;
+    private string? _totpSecret;
+    private string? _error;
+    private string _phoneNumber = string.Empty;
+    private string _phonePassword = string.Empty;
+    private string _phoneCode = string.Empty;
+    private string _phoneDemoCode = string.Empty;
+    private Guid? _phoneChallengeId;
+    private string? _phoneMessage;
+    private bool _phoneError;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ResumePhoneChangeAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        _overview = await SecurityService.GetOverviewAsync(userId);
+    }
+
+    private async Task SavePinAsync()
+    {
+        _error = null;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result result = await SecurityService.SetTransactionPinAsync(userId, _pin, _password);
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("The transaction PIN was saved.", "The transaction PIN was saved.");
+
+        _pin = string.Empty;
+        _password = string.Empty;
+
+        await ReloadAsync();
+    }
+
+    private async Task RequestPhoneChangeAsync()
+    {
+        _phoneError = true;
+        _phoneMessage = null;
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>(
+                "financeFlow.requestPhoneChange",
+                _phoneNumber,
+                _phonePassword);
+
+            if (!response.Ok)
+            {
+                _phoneMessage = "A verification challenge could not be issued. Check the number and password, then try later.";
+                return;
+            }
+
+            using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(response.Body);
+            _phoneChallengeId = body.RootElement.GetProperty("challengeId").GetGuid();
+            _phoneDemoCode = body.RootElement.GetProperty("demoCode").GetString() ?? string.Empty;
+            _phoneCode = string.Empty;
+            _phoneMessage = "Demo verification — no SMS is sent.";
+            _phoneError = false;
+        }
+        catch (JSException)
+        {
+            _phoneMessage = "Phone verification is unavailable.";
+        }
+    }
+
+    private async Task ResumePhoneChangeAsync()
+    {
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>("financeFlow.resumePhoneChallenge");
+            if (!response.Ok)
+            {
+                return;
+            }
+
+            using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(response.Body);
+            if (!body.RootElement.TryGetProperty("pending", out System.Text.Json.JsonElement pending) ||
+                !pending.GetBoolean() ||
+                !body.RootElement.TryGetProperty("purpose", out System.Text.Json.JsonElement purpose) ||
+                purpose.GetString() != "change")
+            {
+                return;
+            }
+
+            _phoneChallengeId = body.RootElement.GetProperty("challengeId").GetGuid();
+            _phoneNumber = body.RootElement.GetProperty("phoneNumber").GetString() ?? string.Empty;
+            _phoneDemoCode = string.Empty;
+            bool expired = body.RootElement.GetProperty("expired").GetBoolean();
+            bool exhausted = body.RootElement.GetProperty("exhausted").GetBoolean();
+            _phoneMessage = expired
+                ? "The previous demo code expired. Request a new demo code to continue."
+                : exhausted
+                    ? "The previous challenge reached its attempt limit. Request a new demo code."
+                    : "A pending phone change was resumed. The previous code is unavailable; request a new demo code.";
+            _phoneError = false;
+            StateHasChanged();
+        }
+        catch (JSException)
+        {
+            // The user can still start a fresh authenticated and password-confirmed request.
+        }
+    }
+
+    private async Task ResendPhoneChangeCodeAsync()
+    {
+        JsResponse response = await JS.InvokeAsync<JsResponse>("financeFlow.resendPhoneCode");
+        if (!response.Ok)
+        {
+            _phoneMessage = ReadPhoneError(response.Body, "Please wait before requesting another demo code.");
+            _phoneError = true;
+            return;
+        }
+
+        using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(response.Body);
+        _phoneChallengeId = body.RootElement.GetProperty("challengeId").GetGuid();
+        _phoneDemoCode = body.RootElement.GetProperty("demoCode").GetString() ?? string.Empty;
+        _phoneCode = string.Empty;
+        _phoneMessage = "Demo verification — no SMS is sent.";
+        _phoneError = false;
+    }
+
+    private async Task VerifyPhoneChangeAsync()
+    {
+        if (_phoneChallengeId is not { } challenge)
+        {
+            _phoneMessage = "The challenge expired. Request a new code.";
+            _phoneError = true;
+            return;
+        }
+
+        JsResponse response = await JS.InvokeAsync<JsResponse>("financeFlow.verifyPhone", challenge, _phoneCode);
+        if (!response.Ok)
+        {
+            _phoneMessage = ReadPhoneError(response.Body, "The code is incorrect, expired or unavailable. Request a new code if needed.");
+            _phoneError = true;
+            return;
+        }
+
+        _phoneChallengeId = null;
+        _phoneDemoCode = string.Empty;
+        _phonePassword = string.Empty;
+        _phoneCode = string.Empty;
+        _phoneMessage = "The phone was saved for local demo sign-in. No SMS ownership was established.";
+        _phoneError = false;
+    }
+
+    private static string ReadPhoneError(string responseBody, string fallback)
+    {
+        try
+        {
+            using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(responseBody);
+            return body.RootElement.TryGetProperty("error", out System.Text.Json.JsonElement error)
+                ? error.GetString() ?? fallback
+                : fallback;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return fallback;
+        }
+    }
+
+    private async Task TerminateAsync(SessionItem session)
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result result = await SecurityService.TerminateSessionAsync(userId, session.Id, "unknown");
+
+        if (result.IsFailure())
+        {
+            ToastService.Error("The session", result.Error);
+            return;
+        }
+
+        ToastService.Success("The session was terminated.", "The session was terminated.");
+
+        await ReloadAsync();
+    }
+
+    private async Task EnableTotpAsync()
+    {
+        _error = null;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result<string> result = await SecurityService.EnableTotpAsync(userId, _totpPassword);
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        _totpSecret = result.ValueOr(default!);
+
+        await ReloadAsync();
+    }
+
+    private async Task VerifyTotpAsync()
+    {
+        _error = null;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result result = await SecurityService.VerifyTotpAsync(userId, _totpCode);
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("The code of the authenticator is correct.", "The code of the authenticator is correct.");
+
+        _totpCode = string.Empty;
+    }
+
+    private static string Describe(LoginEventKind kind) => kind switch
+    {
+        LoginEventKind.SignInSuccess => "Signed in",
+        LoginEventKind.SignInFailed => "Wrong password",
+        LoginEventKind.SignInBlocked => "Blocked",
+        LoginEventKind.SignOut => "Signed out",
+        LoginEventKind.SessionTerminated => "Session terminated",
+        _ => "Event"
+    };
+}

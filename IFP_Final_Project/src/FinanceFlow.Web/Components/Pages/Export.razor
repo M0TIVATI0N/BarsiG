@@ -1,0 +1,105 @@
+@page "/export"
+@attribute [Authorize]
+@inject ExportService ExportService
+@inject UserContext UserContext
+@inject ToastService ToastService
+
+<PageTitle>Export · BarsiG</PageTitle>
+
+<PageHeader Title="Export" Subtitle="Take your data with you." />
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Download your transactions</h2>
+        </header>
+
+        <p class="muted">
+            The export contains every transaction of the account with the date, the type,
+            the category, the amount and the note. The file is produced on the server,
+            so the download works with any browser and any operating system.
+        </p>
+
+        <div class="export-actions">
+            <a class="btn btn-primary" href="/export/transactions.csv" download>
+                <AppIcon Name="download" />
+                <span>Download as CSV</span>
+            </a>
+
+            <a class="btn btn-ghost" href="/export/transactions.json" download>
+                <AppIcon Name="download" />
+                <span>Download as JSON</span>
+            </a>
+        </div>
+
+        <div class="editor-actions">
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="ShowPreviewAsync">
+                Show a preview
+            </button>
+        </div>
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The format</h2>
+        </header>
+
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Column</th>
+                        <th>Content</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Date</td>
+                        <td class="muted">The day of the transaction in the format YYYY-MM-DD</td>
+                    </tr>
+                    <tr>
+                        <td>Type</td>
+                        <td class="muted">Either <code>income</code> or <code>expense</code></td>
+                    </tr>
+                    <tr>
+                        <td>Category</td>
+                        <td class="muted">The name of the category</td>
+                    </tr>
+                    <tr>
+                        <td>Amount</td>
+                        <td class="muted">The amount with two decimal places</td>
+                    </tr>
+                    <tr>
+                        <td>Note</td>
+                        <td class="muted">The optional note</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </article>
+</section>
+
+@if (_preview is not null)
+{
+    <section class="card">
+        <header class="card-header">
+            <h2 class="card-title">Preview</h2>
+            <span class="card-hint">The first lines of the file</span>
+        </header>
+
+        <pre class="code-block">@_preview</pre>
+    </section>
+}
+
+@code {
+    private string? _preview;
+
+    private async Task ShowPreviewAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        string csv = await ExportService.TransactionsToCsvAsync(userId);
+
+        _preview = string.Join('\n', csv.Split('\n').Take(11));
+        ToastService.Info("Preview", "The first lines of the CSV file are shown below.");
+    }
+}

@@ -1,0 +1,197 @@
+@page "/admin"
+@attribute [Authorize(Roles = "Admin")]
+@inject FinanceFlow.Application.Banking.AdminService AdminService
+@inject FinanceFlow.Application.Banking.DepositService DepositService
+@inject FinanceFlow.Infrastructure.Time.AdjustableClock Clock
+@inject UserContext UserContext
+@inject ToastService ToastService
+
+<PageTitle>Demo Bank · BarsiG</PageTitle>
+
+<PageHeader Title="The Demo Bank" Subtitle="The reserve of the simulation and the customers of BarsiG." />
+
+<section class="stat-grid">
+    <article class="stat-card">
+        <div class="stat-label">The reserve</div>
+        <div class="stat-value">@_overview?.ReserveBalance.Format()</div>
+        <div class="stat-hint">The money the Demo Bank can give away</div>
+    </article>
+
+    <article class="stat-card">
+        <div class="stat-label">The money of the customers</div>
+        <div class="stat-value">@_overview?.CustomerBalance.Format()</div>
+        <div class="stat-hint">@_overview?.CustomerCount customers</div>
+    </article>
+
+    <article class="stat-card">
+        <div class="stat-label">The ledger</div>
+        <div class="stat-value">@(_overview?.LedgerIsConsistent == true ? "consistent" : "check")</div>
+        <div class="stat-hint">@_overview?.TransferCount committed transfers</div>
+    </article>
+</section>
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Give virtual money to a customer</h2>
+        </header>
+
+        <div class="form-stack">
+            <div class="field">
+                <label class="field-label" for="admin-customer">Customer</label>
+                <InputSelect id="admin-customer" class="input" @bind-Value="_customerId">
+                    @foreach (AdminCustomerItem customer in _customers)
+                    {
+                        <option value="@customer.UserId">@customer.Name (@customer.MaskedEmail)</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="admin-amount">Amount</label>
+                <input id="admin-amount" class="input" type="number" min="1" step="1" @bind="_amount" />
+            </div>
+
+            @if (_error is not null)
+            {
+                <p class="field-error">@_error</p>
+            }
+
+            <button type="button" class="btn btn-primary" @onclick="FundAsync">Give the money</button>
+
+            <p class="muted">
+                The reserve decreases by exactly the amount the customer receives. The administrator never
+                edits a balance, every movement is a real transaction of the ledger.
+            </p>
+        </div>
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The demonstration of the interest</h2>
+            <span class="card-hint">Only in the development environment</span>
+        </header>
+
+        <div class="form-stack">
+            <p class="muted">
+                The clock of the simulation can be moved forward, so the monthly interest of the deposits
+                is visible during the demonstration. The tool does not exist on a real server.
+            </p>
+
+            <div class="field">
+                <label class="field-label" for="admin-days">Days to move forward</label>
+                <input id="admin-days" class="input" type="number" min="1" max="400" @bind="_days" />
+            </div>
+
+            <button type="button" class="btn btn-ghost" @onclick="AdvanceAsync">Move the clock forward</button>
+
+            @if (_advanced is not null)
+            {
+                <p class="muted">@_advanced</p>
+            }
+        </div>
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The customers of BarsiG</h2>
+            <span class="card-hint">@_customers.Count accounts</span>
+        </header>
+
+        @if (_customers.Count == 0)
+        {
+            <EmptyState Icon="bank" Title="No customer yet" Message="The customers appear after the registration." />
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (AdminCustomerItem customer in _customers)
+                {
+                    <li class="list-item">
+                        <div>
+                            <div class="list-value">@customer.Name</div>
+                            <div class="list-meta">@customer.MaskedEmail</div>
+                        </div>
+                        <div class="money">@customer.Balance.Format()</div>
+                    </li>
+                }
+            </ul>
+        }
+    </article>
+</section>
+
+@code {
+    private AdminOverview? _overview;
+    private IReadOnlyList<AdminCustomerItem> _customers = [];
+    private Guid _customerId;
+    private decimal _amount = 100_000m;
+    private int _days = 31;
+    private string? _error;
+    private string? _advanced;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _overview = await AdminService.GetOverviewAsync();
+
+        _customers = await AdminService.GetCustomersAsync();
+
+        if (_customerId == Guid.Empty && _customers.Count > 0)
+        {
+            _customerId = _customers[0].UserId;
+        }
+    }
+
+    private async Task FundAsync()
+    {
+        _error = null;
+
+        Guid adminId = await UserContext.GetUserIdAsync();
+
+        AdminCustomerItem? customer = _customers.FirstOrDefault(item => item.UserId == _customerId);
+
+        if (customer is null)
+        {
+            _error = "Choose a customer of BarsiG.";
+
+            return;
+        }
+
+        Result<AdminFundingOutcome> result = await AdminService.FundCustomerAsync(
+            adminId,
+            customer.UserId,
+            _amount,
+            "Funding of the Demo Bank",
+            Guid.NewGuid().ToString());
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("Funding", $"The reserve holds now {result.ValueOr(default!).ReserveBalance.Format()}.");
+
+        await ReloadAsync();
+    }
+
+    private async Task AdvanceAsync()
+    {
+        _error = null;
+
+        try
+        {
+            Clock.Advance(TimeSpan.FromDays(_days));
+
+            Result<int> accrued = await DepositService.AccrueInterestAsync();
+
+            _advanced = $"The clock was moved {_days} days forward. The interest was paid for {accrued.ValueOr(0)} months.";
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+}

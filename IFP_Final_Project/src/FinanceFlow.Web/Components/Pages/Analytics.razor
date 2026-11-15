@@ -1,0 +1,187 @@
+@page "/analytics"
+@attribute [Authorize]
+@using System.Globalization
+@inject AnalyticsService AnalyticsService
+@inject UserContext UserContext
+
+<PageTitle>Analytics · BarsiG</PageTitle>
+
+<PageHeader Title="Analytics" Subtitle="Charts and numbers about your money." />
+
+@if (_report is null)
+{
+    <div class="page-loading">
+        <div class="spinner"></div>
+        <p>Building the report…</p>
+    </div>
+}
+else
+{
+    <section class="stat-grid">
+        <StatCard Label="Income" Value="@_report.TotalIncome.Format()" Icon="trend" Accent="var(--success)"
+                  Hint="The selected period" />
+
+        <StatCard Label="Expenses" Value="@_report.TotalExpense.Format()" Icon="cart" Accent="var(--danger)"
+                  Hint="The selected period" />
+
+        <StatCard Label="Savings rate" Value="@($"{_report.SavingsRate:P0}")" Icon="target" Accent="var(--info)"
+                  Hint="The share of the income that was kept" />
+
+        <StatCard Label="Average transaction" Value="@Money.FromDecimal(_report.AverageTransaction).Format()" Icon="chart" Accent="var(--accent)"
+                  Hint="@($"{_report.AveragePerMonth:0.#} transactions per month")" />
+    </section>
+
+    <section class="card">
+        <header class="card-header">
+            <h2 class="card-title">Income and expenses per month</h2>
+            <span class="card-hint">The last six months</span>
+        </header>
+
+        <BarChart Groups="@_barGroups"
+                 Labels="@_monthLabels"
+                 PrimaryColor="var(--chart-income)"
+                 SecondaryColor="var(--chart-expense)"
+                 AriaLabel="Income and expenses of every month" />
+    </section>
+
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">The running balance</h2>
+            </header>
+
+            @if (_report.BalanceLine.Count == 0)
+            {
+                <EmptyState Icon="chart" Title="Not enough data" />
+            }
+            else
+            {
+                <LineChart Values="@_report.BalanceLine.Select(point => (double)point.Value).ToList()"
+                           Labels="@_report.BalanceLine.Select(point => point.Label).ToList()"
+                            Color="var(--info)"
+                           AriaLabel="The running balance" />
+            }
+        </article>
+
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">Daily expenses</h2>
+                <span class="card-hint">The last 30 days</span>
+            </header>
+
+            <LineChart Values="@_report.DailyExpenses.Select(point => (double)point.Value).ToList()"
+                       Labels="@LabelsOfDays(_report.DailyExpenses)"
+                        Color="var(--accent)"
+                       ShowArea="true"
+                       AriaLabel="The expenses of every day" />
+        </article>
+    </section>
+
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">Expenses by category</h2>
+            </header>
+
+            @if (_report.ExpenseBreakdown.Count == 0)
+            {
+                <EmptyState Icon="cart" Title="No expenses in the period" />
+            }
+            else
+            {
+                <div class="donut-layout">
+                    <DonutChart Segments="@_expenseSegments"
+                                CenterLabel="@_report.TotalExpense.Format()"
+                                CenterCaption="expenses" />
+
+                    <ul class="legend">
+                        @foreach ((CategoryBreakdown item, int index) in _report.ExpenseBreakdown.Select((item, index) => (item, index)))
+                        {
+                            <li class="legend-item">
+                                <span class="legend-dot" style="background:@ChartPalette.ForIndex(index);"></span>
+                                <span class="legend-name">@item.Name</span>
+                                <span class="legend-value">@item.Total.Format()</span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </article>
+
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">Income by category</h2>
+            </header>
+
+            @if (_report.IncomeBreakdown.Count == 0)
+            {
+                <EmptyState Icon="trend" Title="No income in the period" />
+            }
+            else
+            {
+                <ul class="list">
+                    @foreach (CategoryBreakdown item in _report.IncomeBreakdown)
+                    {
+                        <li class="list-item">
+                            <CategoryBadge Name="@item.Name" Color="@item.ColorHex" Icon="@item.Icon" />
+                            <span class="list-meta">@item.Share.ToString("P0")</span>
+                            <MoneyText Amount="@item.Total" Kind="@TransactionKind.Income" CssClass="list-value" />
+                        </li>
+                    }
+                </ul>
+            }
+        </article>
+    </section>
+
+    @if (_report.MostExpensiveDay is { } day)
+    {
+        <section class="card">
+            <header class="card-header">
+                <h2 class="card-title">The most expensive day</h2>
+            </header>
+            <p class="muted">
+                The most expensive day was <strong>@day.ToString("dd MMMM yyyy", CultureInfo.InvariantCulture)</strong>.
+                It is worth checking the transactions of that day.
+            </p>
+        </section>
+    }
+}
+
+@code {
+    private AnalyticsReport? _report;
+
+    private List<BarChart.BarGroup> _barGroups => _report is null
+        ? []
+        : _report.Monthly
+            .Select(point => new BarChart.BarGroup((double)point.Income.ToDecimal(), (double)point.Expense.ToDecimal()))
+            .ToList();
+
+    private List<string> _monthLabels => _report is null
+        ? []
+        : _report.Monthly.Select(point => point.Month).ToList();
+
+    private List<DonutChart.Segment> _expenseSegments => _report is null
+        ? []
+        : _report.ExpenseBreakdown
+            .Select((item, index) => new DonutChart.Segment(item.Name, item.Share, ChartPalette.ForIndex(index)))
+            .ToList();
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        _report = await AnalyticsService.GetAsync(userId);
+    }
+
+    private static List<string> LabelsOfDays(IReadOnlyList<TrendPoint> points)
+    {
+        List<string> labels = [];
+
+        for (int index = 0; index < points.Count; index += Math.Max(points.Count / 6, 1))
+        {
+            labels.Add(points[index].Label);
+        }
+
+        return labels;
+    }
+}

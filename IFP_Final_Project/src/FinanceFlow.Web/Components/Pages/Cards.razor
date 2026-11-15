@@ -1,0 +1,169 @@
+@page "/cards"
+@attribute [Authorize]
+@inject FinanceFlow.Application.Banking.VirtualCardService CardService
+@inject FinanceFlow.Application.Banking.AccountService AccountService
+@inject UserContext UserContext
+@inject ToastService ToastService
+
+<PageTitle>Virtual cards · BarsiG</PageTitle>
+
+<PageHeader Title="Virtual cards" Subtitle="Fictional cards of the simulation. They never reach a payment network." />
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Your cards</h2>
+            <span class="card-hint">@_cards.Count cards</span>
+        </header>
+
+        @if (_cards.Count == 0)
+        {
+            <EmptyState Icon="card" Title="No card yet"
+                        Message="Create a virtual card on the right and link it with one of your accounts." />
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (VirtualCardItem card in _cards)
+                {
+                    <li class="list-item">
+                        <div>
+                            <div class="list-value">@card.Nickname</div>
+                            <div class="list-meta">@card.MaskedNumber · @Describe(card.Status)</div>
+                            <div class="list-meta">
+                                Daily limit @card.DailyLimit.Format() · monthly limit @card.MonthlyLimit.Format()
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="() => ToggleAsync(card)">
+                            @(card.Status == VirtualCardStatus.Frozen ? "Unfreeze" : "Freeze")
+                        </button>
+                    </li>
+                }
+            </ul>
+
+            <p class="muted">
+                Only the last four digits of the fictional number are stored. The card is a label of an
+                account of the simulation and can not be used to pay anywhere.
+            </p>
+        }
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Create a card</h2>
+        </header>
+
+        <div class="form-stack">
+            <div class="field">
+                <label class="field-label" for="card-account">Account</label>
+                <InputSelect id="card-account" class="input" @bind-Value="_accountId">
+                    @foreach (AccountSummary account in _accounts)
+                    {
+                        <option value="@account.Id">@account.DisplayName — @account.AccountNumber</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="card-name">Name of the card</label>
+                <input id="card-name" class="input" placeholder="For example: Everyday" @bind="_nickname" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="card-daily">Daily limit</label>
+                <input id="card-daily" class="input" type="number" min="0" step="1" @bind="_dailyLimit" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="card-monthly">Monthly limit</label>
+                <input id="card-monthly" class="input" type="number" min="0" step="1" @bind="_monthlyLimit" />
+            </div>
+
+            @if (_error is not null)
+            {
+                <p class="field-error">@_error</p>
+            }
+
+            <button type="button" class="btn btn-primary" @onclick="CreateAsync">Create the card</button>
+        </div>
+    </article>
+</section>
+
+@code {
+    private IReadOnlyList<VirtualCardItem> _cards = [];
+    private IReadOnlyList<AccountSummary> _accounts = [];
+    private Guid _accountId = Guid.Empty;
+    private string _nickname = string.Empty;
+    private decimal _dailyLimit;
+    private decimal _monthlyLimit;
+    private string? _error;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        _cards = await CardService.GetCardsAsync(userId);
+        _accounts = await AccountService.GetAccountsAsync(userId);
+
+        if (_accountId == Guid.Empty && _accounts.Count > 0)
+        {
+            _accountId = _accounts[0].Id;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _error = null;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result<VirtualCardItem> result = await CardService.CreateAsync(
+            userId,
+            _accountId,
+            _nickname,
+            _dailyLimit,
+            _monthlyLimit);
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("The virtual card was created.", "The virtual card was created.");
+
+        _nickname = string.Empty;
+
+        await ReloadAsync();
+    }
+
+    private async Task ToggleAsync(VirtualCardItem card)
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        bool frozen = card.Status != VirtualCardStatus.Frozen;
+
+        Result<VirtualCardItem> result = await CardService.SetFrozenAsync(userId, card.Id, frozen);
+
+        if (result.IsFailure())
+        {
+            ToastService.Error("The virtual card", result.Error);
+            return;
+        }
+
+        ToastService.Success("Virtual card", frozen ? "The card is frozen." : "The card can be used again.");
+
+        await ReloadAsync();
+    }
+
+    private static string Describe(VirtualCardStatus status) => status switch
+    {
+        VirtualCardStatus.Active => "Active",
+        VirtualCardStatus.Frozen => "Frozen",
+        VirtualCardStatus.Expired => "Expired",
+        _ => "Unknown"
+    };
+}

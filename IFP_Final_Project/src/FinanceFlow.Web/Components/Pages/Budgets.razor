@@ -1,0 +1,192 @@
+@page "/budgets"
+@attribute [Authorize]
+@inject BudgetService BudgetService
+@inject CategoryService CategoryService
+@inject UserContext UserContext
+@inject ToastService ToastService
+
+<PageTitle>Budgets · BarsiG</PageTitle>
+
+<PageHeader Title="Budgets" Subtitle="Monthly limits for your expense categories.">
+    <Actions>
+        <MonthPicker Year="_year" Month="_month"
+                     Minimum="@(new DateOnly(_today.Year, _today.Month, 1).AddMonths(-11))"
+                     Maximum="@(new DateOnly(_today.Year, _today.Month, 1))"
+                     MonthChanged="OnMonthChanged" />
+    </Actions>
+</PageHeader>
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">The limits of the month</h2>
+            <span class="card-hint">@_budgets.Count budgets</span>
+        </header>
+
+        @if (_budgets.Count == 0)
+        {
+            <EmptyState Icon="wallet" Title="No budgets for this month"
+                        Message="Use the form on the right to set a limit for a category." />
+        }
+        else
+        {
+            <ul class="budget-list">
+                @foreach (BudgetItem budget in _budgets)
+                {
+                    <li class="budget-item">
+                        <div class="budget-head">
+                            <span class="budget-name">@budget.CategoryName</span>
+                            <span class="budget-amount">@budget.Spent.Format() / @budget.Limit.Format()</span>
+                        </div>
+                        <ProgressBar Value="@budget.Ratio" Color="@UsageColor(budget.Usage)" ValueText="@UsageText(budget.Usage)" />
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="() => AskDelete(budget)">Remove</button>
+                    </li>
+                }
+            </ul>
+        }
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Set a limit</h2>
+        </header>
+
+        <EditForm Model="_form" OnValidSubmit="SaveAsync" class="form-stack">
+            <div class="field">
+                <label class="field-label" for="budget-category">Category</label>
+                <InputSelect id="budget-category" class="input" @bind-Value="_form.CategoryId">
+                    @foreach (CategoryItem category in ExpenseCategories)
+                    {
+                        <option value="@category.Id">@category.Name</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="budget-limit">Limit</label>
+                <InputNumber id="budget-limit" class="input" @bind-Value="_form.Limit" step="100" />
+                @if (_error is not null)
+                {
+                    <span class="field-error">@_error</span>
+                }
+            </div>
+
+            <div class="editor-actions">
+                <button type="submit" class="btn btn-primary">Save the limit</button>
+            </div>
+        </EditForm>
+    </article>
+</section>
+
+<ConfirmDialog Visible="@(_deleteTarget is not null)"
+               Title="Remove the budget?"
+               Message="@($"The limit of {_deleteTarget?.CategoryName} will be removed.")"
+               ConfirmText="Remove"
+               OnConfirm="ConfirmDeleteAsync"
+               OnCancel="CancelDelete" />
+
+@code {
+    private sealed class BudgetForm
+    {
+        public Guid CategoryId { get; set; }
+
+        public decimal Limit { get; set; } = 10_000m;
+    }
+
+    private readonly DateOnly _today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+    private IReadOnlyList<BudgetItem> _budgets = [];
+    private IReadOnlyList<CategoryItem> _categories = [];
+    private BudgetForm _form = new();
+    private int _year;
+    private int _month;
+    private BudgetItem? _deleteTarget;
+    private string? _error;
+
+    private IEnumerable<CategoryItem> ExpenseCategories =>
+        _categories.Where(category => category.Kind == TransactionKind.Expense);
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        _year = _today.Year;
+        _month = _today.Month;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+        _categories = await CategoryService.GetAllAsync(userId);
+
+        if (ExpenseCategories.Any())
+        {
+            _form.CategoryId = ExpenseCategories.First().Id;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        _budgets = await BudgetService.GetForMonthAsync(userId, _year, _month);
+    }
+
+    private async Task OnMonthChanged((int Year, int Month) value)
+    {
+        _year = value.Year;
+        _month = value.Month;
+        await LoadAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result<BudgetItem> result = await BudgetService.SaveAsync(
+            userId,
+            _form.CategoryId,
+            _year,
+            _month,
+            _form.Limit);
+
+        if (result is not Ok<BudgetItem> ok)
+        {
+            _error = result.Error;
+            return;
+        }
+
+        _error = null;
+        ToastService.Success("Budget saved", $"{ok.Value.CategoryName}: {ok.Value.Limit.Format()}");
+        await LoadAsync();
+    }
+
+    private void AskDelete(BudgetItem budget) => _deleteTarget = budget;
+
+    private void CancelDelete() => _deleteTarget = null;
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is { } target)
+        {
+            Guid userId = await UserContext.GetUserIdAsync();
+            await BudgetService.DeleteAsync(userId, target.Id);
+            ToastService.Success("Budget removed", target.CategoryName);
+        }
+
+        _deleteTarget = null;
+        await LoadAsync();
+    }
+
+    private static string UsageColor(BudgetUsage usage) => usage switch
+    {
+        BudgetUsage.Exceeded => "var(--danger)",
+        BudgetUsage.AlmostReached => "var(--warning)",
+        _ => "var(--accent)"
+    };
+
+    private static string UsageText(BudgetUsage usage) => usage switch
+    {
+        BudgetUsage.Exceeded => "exceeded",
+        BudgetUsage.AlmostReached => "almost reached",
+        BudgetUsage.NotStarted => "not started yet",
+        _ => "on track"
+    };
+}

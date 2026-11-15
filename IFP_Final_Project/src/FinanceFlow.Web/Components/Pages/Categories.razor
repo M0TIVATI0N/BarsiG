@@ -1,0 +1,265 @@
+@page "/categories"
+@attribute [Authorize]
+@implements IDisposable
+@inject CategoryService CategoryService
+@inject UserContext UserContext
+@inject ToastService ToastService
+@inject RealtimeService Realtime
+
+<PageTitle>Categories · BarsiG</PageTitle>
+
+<PageHeader Title="Categories" Subtitle="Income and expense categories with their own colour." />
+
+<section class="card">
+    <header class="card-header">
+        <h2 class="card-title">@(_editing is null ? "New category" : "Edit the category")</h2>
+        @if (_editing is not null)
+        {
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="CancelEdit">Cancel</button>
+        }
+    </header>
+
+    <EditForm Model="_form" OnValidSubmit="SaveAsync" class="form-stack">
+        <div class="form-grid">
+            <div class="field">
+                <label class="field-label" for="category-name">Name</label>
+                <InputText id="category-name" class="input" @bind-Value="_form.Name" />
+                @if (_error is not null)
+                {
+                    <span class="field-error">@_error</span>
+                }
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="category-kind">Type</label>
+                <InputSelect id="category-kind" class="input" @bind-Value="_form.Kind">
+                    <option value="@TransactionKind.Expense">Expense</option>
+                    <option value="@TransactionKind.Income">Income</option>
+                </InputSelect>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="category-color">Colour</label>
+                <input id="category-color" class="input input-color" type="color" @bind="_form.ColorHex" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="category-icon">Icon</label>
+                <InputSelect id="category-icon" class="input" @bind-Value="_form.Icon">
+                    @foreach (string icon in Icons)
+                    {
+                        <option value="@icon">@icon</option>
+                    }
+                </InputSelect>
+            </div>
+        </div>
+
+        <div class="editor-actions">
+            <button type="submit" class="btn btn-primary">@(_editing is null ? "Add the category" : "Save the changes")</button>
+        </div>
+    </EditForm>
+</section>
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Income categories</h2>
+        </header>
+
+        @if (!IncomeCategories.Any())
+        {
+            <EmptyState Icon="trend" Title="No income categories" />
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (CategoryItem category in IncomeCategories)
+                {
+                    <li class="list-item">
+                        <CategoryBadge Name="@category.Name" Color="@category.ColorHex" Icon="@category.Icon" />
+                        <span class="list-meta">@category.TransactionCount transactions</span>
+                        <span class="list-actions">
+                            <button type="button" class="icon-btn" title="Edit" @onclick="() => StartEdit(category)">
+                                <AppIcon Name="edit" />
+                            </button>
+                            <button type="button" class="icon-btn icon-danger" title="Delete" @onclick="() => AskDelete(category)">
+                                <AppIcon Name="trash" />
+                            </button>
+                        </span>
+                    </li>
+                }
+            </ul>
+        }
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Expense categories</h2>
+        </header>
+
+        @if (!ExpenseCategories.Any())
+        {
+            <EmptyState Icon="cart" Title="No expense categories" />
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (CategoryItem category in ExpenseCategories)
+                {
+                    <li class="list-item">
+                        <CategoryBadge Name="@category.Name" Color="@category.ColorHex" Icon="@category.Icon" />
+                        <span class="list-meta">@category.SpentThisMonth.Format() this month</span>
+                        <span class="list-actions">
+                            <button type="button" class="icon-btn" title="Edit" @onclick="() => StartEdit(category)">
+                                <AppIcon Name="edit" />
+                            </button>
+                            <button type="button" class="icon-btn icon-danger" title="Delete" @onclick="() => AskDelete(category)">
+                                <AppIcon Name="trash" />
+                            </button>
+                        </span>
+                    </li>
+                }
+            </ul>
+        }
+    </article>
+</section>
+
+<ConfirmDialog Visible="@(_deleteTarget is not null)"
+               Title="Delete the category?"
+               Message="@($"The category {_deleteTarget?.Name} will be removed. A category with transactions cannot be deleted.")"
+               ConfirmText="Delete"
+               OnConfirm="ConfirmDeleteAsync"
+               OnCancel="CancelDelete" />
+
+@code {
+    private sealed class CategoryForm
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public TransactionKind Kind { get; set; } = TransactionKind.Expense;
+
+        public string ColorHex { get; set; } = "#A8823F";
+
+        public string Icon { get; set; } = "tag";
+    }
+
+    private static readonly string[] Icons =
+    [
+        "tag", "cart", "home", "bus", "bolt", "heart", "film", "bag", "book", "briefcase",
+        "code", "wallet", "chart", "trend", "target", "clock", "calendar"
+    ];
+
+    private IReadOnlyList<CategoryItem> _categories = [];
+    private CategoryForm _form = new();
+    private CategoryItem? _editing;
+    private CategoryItem? _deleteTarget;
+    private string? _error;
+
+    private IEnumerable<CategoryItem> IncomeCategories =>
+        _categories.Where(category => category.Kind == TransactionKind.Income);
+
+    private IEnumerable<CategoryItem> ExpenseCategories =>
+        _categories.Where(category => category.Kind == TransactionKind.Expense);
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Realtime.DataChanged += OnDataChangedAsync;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        _categories = await CategoryService.GetAllAsync(userId, includeArchived: true);
+    }
+
+    private void StartEdit(CategoryItem category)
+    {
+        _editing = category;
+        _error = null;
+
+        _form = new CategoryForm
+        {
+            Name = category.Name,
+            Kind = category.Kind,
+            ColorHex = category.ColorHex,
+            Icon = category.Icon
+        };
+    }
+
+    private void CancelEdit()
+    {
+        _editing = null;
+        _error = null;
+        _form = new CategoryForm();
+    }
+
+    private async Task SaveAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result<CategoryItem> result = _editing is null
+            ? await CategoryService.CreateAsync(userId, _form.Name, _form.Kind, _form.ColorHex, _form.Icon)
+            : await CategoryService.UpdateAsync(
+                userId,
+                _editing.Id,
+                _form.Name,
+                _form.Kind,
+                _form.ColorHex,
+                _form.Icon,
+                _editing.IsArchived);
+
+        if (result is not Ok<CategoryItem> ok)
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("Category saved", ok.Value.Name);
+        CancelEdit();
+        await LoadAsync();
+    }
+
+    private void AskDelete(CategoryItem category) => _deleteTarget = category;
+
+    private void CancelDelete() => _deleteTarget = null;
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is { } target)
+        {
+            Guid userId = await UserContext.GetUserIdAsync();
+            Result result = await CategoryService.DeleteAsync(userId, target.Id);
+
+            if (result is Result.Failure failure)
+            {
+                ToastService.Error("Could not delete", failure.Error);
+            }
+            else
+            {
+                ToastService.Success("Category deleted", target.Name);
+            }
+        }
+
+        _deleteTarget = null;
+        await LoadAsync();
+    }
+
+    private async Task OnDataChangedAsync(string entity, string action)
+    {
+        if (entity != "categories")
+        {
+            return;
+        }
+
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Realtime.DataChanged -= OnDataChangedAsync;
+    }
+}

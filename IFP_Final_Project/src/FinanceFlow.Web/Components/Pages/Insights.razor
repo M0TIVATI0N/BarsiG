@@ -1,0 +1,92 @@
+@page "/insights"
+@attribute [Authorize]
+@implements IDisposable
+@inject InsightsService InsightsService
+@inject UserContext UserContext
+@inject RealtimeService Realtime
+
+<PageTitle>Smart insights · BarsiG</PageTitle>
+
+<PageHeader Title="Smart insights" Subtitle="Personal advice that is derived from your own numbers." />
+
+@if (_insights is null)
+{
+    <div class="page-loading">
+        <div class="spinner"></div>
+    </div>
+}
+else if (_insights.Count == 0)
+{
+    <EmptyState Icon="bulb" Title="No insights yet"
+                Message="Record more transactions and the rules of the engine will find something to say." />
+}
+else
+{
+    <section class="insight-grid">
+        @foreach (Insight insight in _insights)
+        {
+            <article class="card insight-card insight-@insight.Severity.ToString().ToLowerInvariant()">
+                <header class="insight-card-header">
+                    <span class="insight-card-icon">
+                        <AppIcon Name="@IconFor(insight.Kind)" />
+                    </span>
+                    <div>
+                        <h2 class="insight-card-title">@insight.Title</h2>
+                        <span class="insight-card-kind">@insight.Kind</span>
+                    </div>
+                </header>
+
+                <p class="insight-card-text">@insight.Description</p>
+
+                @if (!string.IsNullOrWhiteSpace(insight.Action))
+                {
+                    <p class="insight-card-action"><AppIcon Name="bulb" /> @insight.Action</p>
+                }
+            </article>
+        }
+    </section>
+}
+
+@code {
+    private IReadOnlyList<Insight>? _insights;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Realtime.DataChanged += OnDataChangedAsync;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        _insights = await InsightsService.GetAsync(userId);
+    }
+
+    private static string IconFor(InsightKind kind) => kind switch
+    {
+        InsightKind.Budget => "wallet",
+        InsightKind.Anomaly => "alert",
+        InsightKind.Goal => "target",
+        InsightKind.Distribution => "chart",
+        InsightKind.Positive => "check",
+        _ => "trend"
+    };
+
+    private async Task OnDataChangedAsync(string entity, string action)
+    {
+        if (entity is not ("transactions" or "budgets" or "goals"))
+        {
+            return;
+        }
+
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Realtime.DataChanged -= OnDataChangedAsync;
+    }
+}

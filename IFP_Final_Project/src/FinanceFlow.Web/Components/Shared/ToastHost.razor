@@ -1,0 +1,71 @@
+@implements IDisposable
+@inject ToastService ToastService
+
+<div class="toast-host" aria-live="polite">
+    @foreach (ToastMessage message in Messages ?? [])
+    {
+        <div class="toast toast-@KindClass(message.Kind)" role="status">
+            <AppIcon Name="@IconFor(message.Kind)" CssClass="toast-icon" />
+
+            <div class="toast-body">
+                <strong class="toast-title">@message.Title</strong>
+                <span class="toast-message">@message.Message</span>
+            </div>
+
+            <button type="button" class="toast-close" aria-label="Close" @onclick="() => ToastService.Remove(message.Id)">
+                <AppIcon Name="close" />
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// The messages come from a cascading value. A component is only re-rendered when one of
+    /// its parameters changes, therefore the list has to arrive as a parameter and not
+    /// only as a service.
+    /// </summary>
+    [CascadingParameter]
+    private IReadOnlyList<ToastMessage>? Messages { get; set; }
+
+    private Timer? _timer;
+
+    /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        _timer = new Timer(
+            _ => InvokeAsync(() =>
+            {
+                if (ToastService.State.Count > 0)
+                {
+                    ToastService.Remove(ToastService.State[0].Id);
+                }
+
+                StateHasChanged();
+            }),
+            null,
+            TimeSpan.FromSeconds(6),
+            TimeSpan.FromSeconds(4));
+    }
+
+    private static string KindClass(ToastKind kind) => kind switch
+    {
+        ToastKind.Success => "success",
+        ToastKind.Error => "error",
+        _ => "info"
+    };
+
+    private static string IconFor(ToastKind kind) => kind switch
+    {
+        ToastKind.Success => "check",
+        ToastKind.Error => "alert",
+        _ => "info"
+    };
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _timer = null;
+    }
+}

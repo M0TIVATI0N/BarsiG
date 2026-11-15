@@ -1,0 +1,409 @@
+@page "/transfers"
+@attribute [Authorize]
+@inject FinanceFlow.Application.Banking.TransferService TransferService
+@inject FinanceFlow.Application.Banking.SecurityService SecurityService
+@inject UserContext UserContext
+@inject ToastService ToastService
+
+<PageTitle>Transfers · BarsiG</PageTitle>
+
+<PageHeader Title="Transfers" Subtitle="Move virtual money to another customer of BarsiG." />
+
+@if (_step == 1)
+{
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">1. Find the recipient</h2>
+                <span class="card-hint">Use the customer's verified Kazakhstan mobile number.</span>
+            </header>
+
+            <div class="form-stack">
+                <div class="field">
+                    <label class="field-label" for="recipient-phone">Recipient phone number</label>
+                    <input id="recipient-phone" class="input" type="tel" autocomplete="tel"
+                            inputmode="tel" placeholder="777 777 77 77" @bind="_phone" disabled="@_busy" />
+                </div>
+
+                <button type="button" class="btn btn-primary" @onclick="FindRecipientAsync" disabled="@_busy">
+                    @(_busy ? "Searching…" : "Find recipient")
+                </button>
+
+                @if (_error is not null)
+                {
+                    <p class="field-error" role="alert">@_error</p>
+                }
+                else if (_recipient is null)
+                {
+                    <EmptyState Icon="send" Title="Recipient details stay private"
+                                Message="Only a verified eligible customer can be found. The full phone number and contact details are never shown." />
+                }
+                else
+                {
+                    <div class="recipient-confirmation" role="status">
+                        <span class="recipient-confirmation-label">Confirm this customer</span>
+                        <strong>@_recipient.DisplayName</strong>
+                        <span class="muted">@_recipient.MaskedPhoneNumber</span>
+                        <span class="muted">@_recipient.DestinationAccountHint</span>
+                        <button type="button" class="btn btn-primary" @onclick="ContinueToAmount" disabled="@_busy">
+                            Continue
+                        </button>
+                    </div>
+                }
+            </div>
+        </article>
+
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">Private phone lookup</h2>
+            </header>
+            <p class="muted">
+                Search uses the normalized Kazakhstan number. Unverified, unknown, inactive, and ineligible accounts
+                receive the same response. The destination is checked again when the ledger transfer is committed.
+            </p>
+        </article>
+    </section>
+}
+else if (_step == 2)
+{
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">2. The amount</h2>
+                <span class="card-hint">Virtual Kazakhstani tenge</span>
+            </header>
+
+            <div class="form-stack">
+                <div class="field">
+                    <label class="field-label" for="amount">Amount</label>
+                    <input id="amount" class="input" type="number" min="1" step="0.01" @bind="_amount" />
+                </div>
+
+                <div class="field">
+                    <label class="field-label" for="description">Description</label>
+                    <input id="description" class="input" placeholder="For example: lunch" @bind="_description" />
+                </div>
+
+                @if (_error is not null)
+                {
+                    <p class="field-error">@_error</p>
+                }
+
+                <div class="editor-actions">
+                    <button type="button" class="btn btn-ghost" @onclick="() => _step = 1">Back</button>
+                    <button type="button" class="btn btn-primary" @onclick="PreviewAsync" disabled="@_busy">
+                        @(_busy ? "Checking…" : "Review the transfer")
+                    </button>
+                </div>
+            </div>
+        </article>
+
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">The recipient</h2>
+            </header>
+
+            <ul class="list">
+                <li class="list-item">
+                    <span class="list-meta">Customer</span>
+                    <span class="list-value">@_recipient?.DisplayName</span>
+                </li>
+                <li class="list-item">
+                    <span class="list-meta">Verified phone</span>
+                    <span class="list-value">@_recipient?.MaskedPhoneNumber</span>
+                </li>
+                <li class="list-item">
+                    <span class="list-meta">Destination account</span>
+                    <span class="list-value">@_recipient?.DestinationAccountHint</span>
+                </li>
+            </ul>
+        </article>
+    </section>
+}
+else if (_step == 3)
+{
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">3. Review and confirm</h2>
+            </header>
+
+            <ul class="list">
+                <li class="list-item">
+                    <span class="list-meta">Sender</span>
+                    <span class="list-value">@_preview?.SenderName · @_preview?.SenderAccountNumber</span>
+                </li>
+                <li class="list-item">
+                    <span class="list-meta">Recipient</span>
+                    <span class="list-value">@_preview?.RecipientName · @_preview?.RecipientAccountNumber</span>
+                </li>
+                <li class="list-item">
+                    <span class="list-meta">Verified phone</span>
+                    <span class="list-value">@_preview?.RecipientPhoneHint</span>
+                </li>
+                <li class="list-item">
+                    <span class="list-meta">Amount</span>
+                    <span class="list-value money">@_preview?.Amount.Format()</span>
+                </li>
+                <li class="list-item">
+                    <span class="list-meta">Description</span>
+                    <span class="list-value">@_preview?.Description</span>
+                </li>
+                <li class="list-item">
+                    <span class="list-meta">Balance after the transfer</span>
+                    <span class="list-value money">@_preview?.BalanceAfter.Format()</span>
+                </li>
+            </ul>
+
+            @if (_requirement.RequiresPin)
+            {
+                <div class="field">
+                    <label class="field-label" for="pin">Transaction PIN</label>
+                    <input id="pin" class="input" type="password" inputmode="numeric" maxlength="8" @bind="_pin" />
+                    <p class="muted">@_requirement.Reason</p>
+                </div>
+            }
+            else if (_requirement.RequiresPassword)
+            {
+                <div class="field">
+                    <label class="field-label" for="password">Password</label>
+                    <input id="password" class="input" type="password" @bind="_password" />
+                    <p class="muted">@_requirement.Reason</p>
+                </div>
+            }
+
+            @if (_error is not null)
+            {
+                <p class="field-error">@_error</p>
+            }
+
+            <div class="editor-actions">
+                <button type="button" class="btn btn-ghost" @onclick="() => _step = 2" disabled="@_busy">Back</button>
+                <button type="button" class="btn btn-primary" @onclick="ConfirmAsync" disabled="@_busy">
+                    @(_busy ? "Processing…" : "Confirm the transfer")
+                </button>
+            </div>
+        </article>
+
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">What happens now</h2>
+            </header>
+
+            <p class="muted">
+                The money leaves the primary account and arrives at the primary account of the recipient
+                inside one database transaction. If the transfer fails, no money is moved at all.
+                The same request can never be executed twice.
+            </p>
+        </article>
+    </section>
+}
+else
+{
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">4. The transfer is done</h2>
+            </header>
+
+            @if (_outcome is not null)
+            {
+                <ul class="list">
+                    <li class="list-item">
+                        <span class="list-meta">Transaction number</span>
+                        <span class="list-value">@_outcome.TransferId.ToString().ToUpperInvariant()</span>
+                    </li>
+                    <li class="list-item">
+                        <span class="list-meta">Amount</span>
+                        <span class="list-value money">@_outcome.Amount.Format()</span>
+                    </li>
+                    <li class="list-item">
+                        <span class="list-meta">Your new balance</span>
+                        <span class="list-value money">@_outcome.SenderBalance.Format()</span>
+                    </li>
+                    <li class="list-item">
+                        <span class="list-meta">Balance of the recipient</span>
+                        <span class="list-value money">@_outcome.RecipientBalance.Format()</span>
+                    </li>
+                </ul>
+
+                <a class="btn btn-primary" href="banking/transfers/@_outcome.TransferId.ToString()/receipt.pdf">
+                    <AppIcon Name="receipt" /> Download the receipt
+                </a>
+
+                <button type="button" class="btn btn-ghost" @onclick="StartOver">Make another transfer</button>
+            }
+        </article>
+    </section>
+}
+
+@code {
+    private int _step = 1;
+    private string _phone = string.Empty;
+    private PhoneRecipientPreview? _recipient;
+    private decimal _amount;
+    private string _description = string.Empty;
+    private TransferPreview? _preview;
+    private TransferOutcome? _outcome;
+    private StepUpRequirement _requirement = new(false, false, string.Empty);
+    private string? _error;
+    private string _pin = string.Empty;
+    private string _password = string.Empty;
+    private string _idempotencyKey = Guid.NewGuid().ToString();
+    private bool _busy;
+
+    private void ContinueToAmount()
+    {
+        if (_recipient is not null)
+        {
+            _error = null;
+            _step = 2;
+        }
+    }
+
+    private async Task FindRecipientAsync()
+    {
+        _busy = true;
+        _error = null;
+        _recipient = null;
+
+        try
+        {
+            Guid userId = await UserContext.GetUserIdAsync();
+            Result<PhoneRecipientPreview> result =
+                await TransferService.FindRecipientByPhoneAsync(userId, _phone);
+
+            if (result.IsFailure())
+            {
+                _error = result.Error;
+                return;
+            }
+
+            _recipient = result.ValueOr(default!);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (_recipient is null)
+        {
+            _error = "Find and confirm a recipient before continuing.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            Guid userId = await UserContext.GetUserIdAsync();
+            var request = new TransferRequest(
+                _recipient.UserId,
+                _amount,
+                _description,
+                _idempotencyKey,
+                RecipientPhoneNumber: _phone);
+
+            Result<TransferPreview> result = await TransferService.PreviewAsync(userId, request);
+
+            if (result.IsFailure())
+            {
+                _error = result.Error;
+                return;
+            }
+
+            _preview = result.ValueOr(default!);
+            _requirement = await SecurityService.GetRequirementAsync(userId, await UserContext.GetAuthenticatedAtAsync());
+
+            _step = 3;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_recipient is null)
+        {
+            _error = "Find and confirm the recipient again before sending.";
+            _step = 1;
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            Guid userId = await UserContext.GetUserIdAsync();
+
+            // The confirmation of a sensitive operation is checked by the server.
+            if (_requirement.RequiresPin)
+            {
+                Result pinResult = await SecurityService.VerifyTransactionPinAsync(userId, _pin);
+
+                if (pinResult.IsFailure())
+                {
+                    _error = pinResult.Error;
+                    return;
+                }
+            }
+            else if (_requirement.RequiresPassword)
+            {
+                Result passwordResult = await SecurityService.VerifyPasswordAsync(userId, _password);
+
+                if (passwordResult.IsFailure())
+                {
+                    _error = passwordResult.Error;
+                    return;
+                }
+            }
+
+            var request = new TransferRequest(
+                _recipient.UserId,
+                _amount,
+                _description,
+                _idempotencyKey,
+                RecipientPhoneNumber: _phone);
+
+            Result<TransferOutcome> result = await TransferService.ExecuteAsync(userId, request);
+
+            if (result.IsFailure())
+            {
+                _error = result.Error;
+                return;
+            }
+
+            _outcome = result.ValueOr(default!);
+
+            ToastService.Success("The transfer was completed.", "The transfer was completed.");
+
+            _step = 4;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void StartOver()
+    {
+        _step = 1;
+        _recipient = null;
+        _phone = string.Empty;
+        _preview = null;
+        _outcome = null;
+        _amount = 0m;
+        _description = string.Empty;
+        _error = null;
+        _pin = string.Empty;
+        _password = string.Empty;
+        _idempotencyKey = Guid.NewGuid().ToString();
+    }
+}

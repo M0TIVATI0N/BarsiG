@@ -1,0 +1,49 @@
+@*
+    A modal dialog that asks the user to confirm a destructive action.
+*@
+
+@if (Visible)
+{
+    <div class="modal-backdrop" @onclick="OnCancelAsync">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"
+             @onclick:stopPropagation="true">
+            <h2 class="modal-title" id="confirm-title">@Title</h2>
+            <p class="modal-message">@Message</p>
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" @onclick="OnCancelAsync">Cancel</button>
+                <button type="button" class="btn btn-danger" @onclick="OnConfirmAsync">@ConfirmText</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Shows or hides the dialog.</summary>
+    [Parameter]
+    public bool Visible { get; set; }
+
+    /// <summary>The headline of the dialog.</summary>
+    [Parameter]
+    public string Title { get; set; } = "Are you sure?";
+
+    /// <summary>The explanation of the dialog.</summary>
+    [Parameter]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>The label of the confirmation button.</summary>
+    [Parameter]
+    public string ConfirmText { get; set; } = "Confirm";
+
+    /// <summary>Raised when the user confirms the action.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Raised when the user cancels the action.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private Task OnConfirmAsync() => OnConfirm.InvokeAsync();
+
+    private Task OnCancelAsync() => OnCancel.InvokeAsync();
+}

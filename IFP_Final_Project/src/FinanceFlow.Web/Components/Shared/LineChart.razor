@@ -1,0 +1,110 @@
+@*
+    A line chart that is drawn with inline SVG. No JavaScript library is used.
+*@
+
+<div class="chart">
+    <svg class="chart-svg" viewBox="@($"0 0 {Width} {Height}")" preserveAspectRatio="none"
+         role="img" aria-label="@AriaLabel">
+        @if (ShowGrid)
+        {
+            @for (int line = 0; line <= 4; line++)
+            {
+                double y = (Height / 4d) * line;
+                <line class="chart-grid-line" x1="0" x2="@Width" y1="@ChartGeometry.Number(y)" y2="@ChartGeometry.Number(y)" />
+            }
+        }
+
+        @if (ShowArea && Values.Count > 1)
+        {
+            <path class="chart-area" d="@AreaPath" style="fill:@Color" opacity="0.14" />
+        }
+
+        @if (Values.Count > 1)
+        {
+            <path class="chart-line" d="@LinePath" style="stroke:@Color;fill:none" />
+        }
+
+        @foreach ((double X, double Y) point in ProjectedPoints)
+        {
+            <circle class="chart-point" cx="@ChartGeometry.Number(point.X)" cy="@ChartGeometry.Number(point.Y)" r="3.5"
+                    style="fill:@Color" />
+        }
+    </svg>
+
+    @if (Labels.Count > 0)
+    {
+        <div class="chart-labels">
+            @foreach (string label in VisibleLabels)
+            {
+                <span class="chart-label">@label</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The maximum number of labels under the chart.</summary>
+    private const int MaxLabels = 8;
+
+    /// <summary>The values of the series.</summary>
+    [Parameter]
+    public IReadOnlyList<double> Values { get; set; } = [];
+
+    /// <summary>The optional labels under the chart.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Labels { get; set; } = [];
+
+    private IReadOnlyList<string> VisibleLabels
+    {
+        get
+        {
+            if (Labels.Count <= MaxLabels)
+            {
+                return Labels;
+            }
+
+            int step = (int)Math.Ceiling(Labels.Count / (double)MaxLabels);
+
+            return Labels
+                .Where((_, index) => index % step == 0 || index == Labels.Count - 1)
+                .ToList();
+        }
+    }
+
+    /// <summary>The colour of the line.</summary>
+    [Parameter]
+    public string Color { get; set; } = "var(--info)";
+
+    /// <summary>The width of the drawing area in SVG units.</summary>
+    [Parameter]
+    public int Width { get; set; } = 720;
+
+    /// <summary>The height of the drawing area in SVG units.</summary>
+    [Parameter]
+    public int Height { get; set; } = 240;
+
+    /// <summary>Draws the horizontal helper lines.</summary>
+    [Parameter]
+    public bool ShowGrid { get; set; } = true;
+
+    /// <summary>Fills the area under the line.</summary>
+    [Parameter]
+    public bool ShowArea { get; set; } = true;
+
+    /// <summary>The accessible description of the chart.</summary>
+    [Parameter]
+    public string AriaLabel { get; set; } = "Line chart";
+
+    private IReadOnlyList<(double X, double Y)> ProjectedPoints
+    {
+        get
+        {
+            (double min, double max) = ChartGeometry.Range(Values);
+            return ChartGeometry.Project(Values, Width, Height, 8, 8, 12, 12, min, max);
+        }
+    }
+
+    private string LinePath => ChartGeometry.BuildLinePath(ProjectedPoints);
+
+    private string AreaPath => ChartGeometry.BuildAreaPath(ProjectedPoints, Height - 12);
+}

@@ -1,0 +1,37 @@
+@*
+    Shows a monetary amount. The sign and the colour depend on the direction of the transaction.
+*@
+
+<span class="money @CssClass" style="@Style">
+    @Formatted
+</span>
+
+@code {
+    /// <summary>The amount.</summary>
+    [Parameter]
+    public Money Amount { get; set; }
+
+    /// <summary>The direction of the transaction.</summary>
+    [Parameter]
+    public TransactionKind? Kind { get; set; }
+
+    /// <summary>The currency symbol.</summary>
+    [Parameter]
+    public string CurrencySymbol { get; set; } = Money.DefaultCurrencySymbol;
+
+    /// <summary>Additional CSS classes.</summary>
+    [Parameter]
+    public string? CssClass { get; set; }
+
+    private bool IsIncome => Kind == TransactionKind.Income;
+
+    private string Style => IsIncome
+        ? $"color:var(--success);"
+        : Kind == TransactionKind.Expense
+            ? "color:var(--text);"
+            : string.Empty;
+
+    private string Formatted => IsIncome
+        ? $"+{Amount.Format(CurrencySymbol)}"
+        : Amount.Format(CurrencySymbol);
+}

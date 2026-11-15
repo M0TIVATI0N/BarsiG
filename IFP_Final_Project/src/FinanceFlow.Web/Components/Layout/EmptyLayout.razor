@@ -1,0 +1,29 @@
+@inherits LayoutComponentBase
+@inject IJSRuntime JS
+
+@*
+    An empty layout for the pages that are shown without the menu,
+    for example the sign in page and the registration page.
+*@
+
+@Body
+
+@code {
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("financeFlow.markReady");
+        }
+        catch (JSException)
+        {
+            // The flag is only used by the automated tests.
+        }
+    }
+}

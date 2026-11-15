@@ -1,0 +1,74 @@
+@*
+    A ring chart that shows the share of every category. It is drawn with inline SVG.
+*@
+
+<div class="donut">
+    <svg class="donut-svg" viewBox="0 0 @($"{Size} {Size}")" role="img" aria-label="@AriaLabel">
+        <circle class="donut-track" cx="@Center" cy="@Center" r="@Radius" fill="none"
+                style="stroke:var(--surface-alt)" stroke-width="@Thickness" />
+
+        @{
+            double angle = 0d;
+        }
+
+        @foreach (Segment segment in Segments)
+        {
+            double sweep = segment.Share * 360d;
+
+            @if (sweep > 0.1d)
+            {
+                <path d="@ChartGeometry.BuildArcPath(Center, Center, Radius, angle, angle + sweep)"
+                      fill="none" style="stroke:@segment.Color" stroke-width="@Thickness"
+                      stroke-linecap="butt">
+                    <title>@segment.Label</title>
+                </path>
+            }
+
+            angle += sweep;
+        }
+    </svg>
+
+    @if (CenterLabel is not null)
+    {
+        <div class="donut-center">
+            <span class="donut-center-value">@CenterLabel</span>
+            <span class="donut-center-caption">@CenterCaption</span>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>One segment of the ring.</summary>
+    /// <param name="Label">The name of the segment.</param>
+    /// <param name="Share">The share of the segment, a number between zero and one.</param>
+    /// <param name="Color">The colour of the segment.</param>
+    public readonly record struct Segment(string Label, double Share, string Color);
+
+    /// <summary>The segments of the ring.</summary>
+    [Parameter]
+    public IReadOnlyList<Segment> Segments { get; set; } = [];
+
+    /// <summary>The size of the drawing area in SVG units.</summary>
+    [Parameter]
+    public int Size { get; set; } = 220;
+
+    /// <summary>The thickness of the ring.</summary>
+    [Parameter]
+    public int Thickness { get; set; } = 28;
+
+    /// <summary>The optional big number in the middle of the ring.</summary>
+    [Parameter]
+    public string? CenterLabel { get; set; }
+
+    /// <summary>The optional caption under the big number.</summary>
+    [Parameter]
+    public string? CenterCaption { get; set; }
+
+    /// <summary>The accessible description of the chart.</summary>
+    [Parameter]
+    public string AriaLabel { get; set; } = "Ring chart";
+
+    private double Center => Size / 2d;
+
+    private double Radius => (Size / 2d) - (Thickness / 2d) - 2d;
+}

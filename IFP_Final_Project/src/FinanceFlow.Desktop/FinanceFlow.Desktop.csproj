@@ -1,0 +1,109 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>BarsiG</AssemblyName>
+    <RootNamespace>FinanceFlow.Desktop</RootNamespace>
+    <Product>BarsiG — Digital Banking Simulator</Product>
+    <AssemblyTitle>BarsiG</AssemblyTitle>
+    <Description>BarsiG is an educational banking simulator for the course FP 3222. All money is virtual.</Description>
+    <Company>Faculty of Informatics, course FP 3222</Company>
+    <ProductVersion>1.0.0</ProductVersion>
+    <Version>1.0.0</Version>
+    <!-- The approved icon of BarsiG is the icon of the executable. -->
+    <ApplicationIcon>..\..\BarsiG_App_Icon.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!--
+      The desktop application hosts the web application of BarsiG. It therefore needs the
+      static web assets of the web project: without them the files of the framework of
+      Blazor (blazor.web.js) are missing, the interface of the simulator stays a static
+      page and the forms of the sign in are sent as an ordinary request without the
+      antiforgery token. The property turns the pipeline of the static web assets on.
+    -->
+    <StaticWebAssetsEnabled>true</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The desktop application hosts the server of BarsiG inside its own process. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Web.WebView2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FinanceFlow.Web\FinanceFlow.Web.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The icon of the window and the logo of the splash screen. -->
+    <Resource Include="Assets\BarsiG_App_Icon.ico" />
+    <Resource Include="Assets\BarsiG_App_Icon_Navy.png" />
+    <Resource Include="Assets\BarsiG_Logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!--
+    The static files of the web application are needed by the hosted server. They are
+    copied from the folder wwwroot of the web project, the files of the framework of
+    Blazor are added by the target below. The copy is skipped when the application is
+    published, there the published folder wwwroot of the web application is used.
+  -->
+  <ItemGroup>
+    <Content Include="..\FinanceFlow.Web\wwwroot\**\*"
+             Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!--
+    The files of the framework of Blazor (blazor.web.js) are created when the web
+    application is published. The target below publishes the web application into a
+    temporary folder and adds its folder wwwroot to the output of the desktop
+    application, so that BarsiG.exe always serves exactly the same files as the web
+    application of the simulator.
+  -->
+  <Target Name="AddWebApplicationStaticFilesToPublish" BeforeTargets="ComputeResolvedFilesToPublishList">
+    <PropertyGroup>
+      <_WebPublishDirectory>$([System.IO.Path]::GetFullPath('$(BaseIntermediateOutputPath)web-publish\'))</_WebPublishDirectory>
+    </PropertyGroup>
+
+    <MSBuild Projects="..\FinanceFlow.Web\FinanceFlow.Web.csproj"
+             Targets="Publish"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);PublishDir=$(_WebPublishDirectory)"
+             RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;Platform;SelfContained;PublishSingleFile;PublishReadyToRun">
+      <Output TaskParameter="TargetOutputs" ItemName="_WebPublishOutput" />
+    </MSBuild>
+
+    <ItemGroup>
+      <_WebStaticFile Include="$(_WebPublishDirectory)wwwroot\**\*" />
+      <ResolvedFileToPublish Include="@(_WebStaticFile)">
+        <RelativePath>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <!--
+    The desktop application has its own configuration file. The configuration of the web
+    project would have the same name in the output folder, so it is removed there:
+    the file of the desktop application describes the whole server of the simulation.
+  -->
+  <Target Name="RemoveWebApplicationSettings" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)' == 'appsettings' AND $([System.String]::Copy('%(FullPath)').Contains('FinanceFlow.Web'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

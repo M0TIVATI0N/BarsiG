@@ -1,0 +1,48 @@
+@*
+    A single number of the dashboard. The component only receives data, it never loads anything.
+*@
+
+<div class="stat-card @CssClass">
+    <div class="stat-icon" style="@IconStyle">
+        <AppIcon Name="@Icon" />
+    </div>
+
+    <div class="stat-body">
+        <span class="stat-label">@Label</span>
+        <span class="stat-value">@Value</span>
+
+        @if (!string.IsNullOrWhiteSpace(Hint))
+        {
+            <span class="stat-hint">@Hint</span>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The caption of the number.</summary>
+    [Parameter]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>The formatted value.</summary>
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>The optional hint under the value.</summary>
+    [Parameter]
+    public string? Hint { get; set; }
+
+    /// <summary>The name of the icon.</summary>
+    [Parameter]
+    public string Icon { get; set; } = "circle";
+
+    /// <summary>The accent colour of the card.</summary>
+    [Parameter]
+    public string Accent { get; set; } = "var(--accent)";
+
+    /// <summary>Additional CSS classes of the card.</summary>
+    [Parameter]
+    public string? CssClass { get; set; }
+
+    private string IconStyle =>
+        $"--stat-accent:{Accent};background:color-mix(in srgb, {Accent} 14%, transparent);color:{Accent};";
+}

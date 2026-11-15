@@ -1,0 +1,234 @@
+@page "/deposits"
+@attribute [Authorize]
+@inject FinanceFlow.Application.Banking.DepositService DepositService
+@inject UserContext UserContext
+@inject ToastService ToastService
+
+<PageTitle>Deposits · BarsiG</PageTitle>
+
+<PageHeader Title="Savings deposits" Subtitle="Virtual deposits with a monthly educational interest." />
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Your deposits</h2>
+            <span class="card-hint">@_deposits.Count deposits</span>
+        </header>
+
+        @if (_deposits.Count == 0)
+        {
+            <EmptyState Icon="vault" Title="No deposit yet"
+                        Message="Open a deposit on the right and fill it with virtual money from your primary account." />
+        }
+        else
+        {
+            <ul class="list">
+                @foreach (DepositItem deposit in _deposits)
+                {
+                    <li class="list-item">
+                        <div>
+                            <div class="list-value">@deposit.Name</div>
+                            <div class="list-meta">
+                                @deposit.AnnualRatePercent.ToString("0.##", CultureInfo.InvariantCulture) % per year ·
+                                @deposit.TermMonths months · @Describe(deposit.Status)
+                            </div>
+                            <div class="list-meta">
+                                Interest paid up to @deposit.LastAccruedMonth.ToString("MMM yyyy", CultureInfo.InvariantCulture)
+                            </div>
+                            @if (deposit.Status == DepositStatus.Active && deposit.TermMonths > 0)
+                            {
+                                <div class="list-meta">
+                                    Projection: @deposit.ProjectedBalance.Format() after @deposit.TermMonths months
+                                </div>
+                            }
+                        </div>
+                        <div class="money">@deposit.Balance.Format()</div>
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="() => SelectAsync(deposit.Id)">
+                            Manage
+                        </button>
+                    </li>
+                }
+            </ul>
+
+            @if (_selected is not null)
+            {
+                <div class="form-stack">
+                    <h3 class="card-title">@_selected.Name</h3>
+
+                    <div class="field">
+                        <label class="field-label" for="contribute">Add money</label>
+                        <input id="contribute" class="input" type="number" min="1" step="0.01" @bind="_amount" />
+                    </div>
+
+                    <div class="editor-actions">
+                        <button type="button" class="btn btn-primary btn-sm" @onclick="ContributeAsync">Add money</button>
+                        <button type="button" class="btn btn-ghost btn-sm" @onclick="WithdrawAsync">Withdraw everything</button>
+                    </div>
+
+                    @if (_interest.Count > 0)
+                    {
+                        <h3 class="card-title">The interest payments</h3>
+                        <ul class="list">
+                            @foreach (DepositInterestItem item in _interest)
+                            {
+                                <li class="list-item">
+                                    <span class="list-meta">@item.PeriodMonth.ToString("MMMM yyyy", CultureInfo.InvariantCulture)</span>
+                                    <span class="list-value money">+@item.Interest.Format()</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+            else
+            {
+                <p class="muted">Choose a deposit to add money to it or to take the money back.</p>
+            }
+        }
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Open a new deposit</h2>
+        </header>
+
+        <div class="form-stack">
+            <div class="field">
+                <label class="field-label" for="deposit-name">Name</label>
+                <input id="deposit-name" class="input" placeholder="For example: Holiday in Almaty" @bind="_name" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="deposit-rate">Yearly interest rate in percent</label>
+                <input id="deposit-rate" class="input" type="number" min="0.1" step="0.1" @bind="_rate" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="deposit-term">Term in months</label>
+                <input id="deposit-term" class="input" type="number" min="1" max="120" @bind="_term" />
+            </div>
+
+            @if (_error is not null)
+            {
+                <p class="field-error">@_error</p>
+            }
+
+            <button type="button" class="btn btn-primary" @onclick="OpenAsync">Open the deposit</button>
+
+            <p class="muted">
+                The interest is an educational rate of the simulation. It is paid monthly out of the reserve
+                of the Demo Bank and it never changes the total amount of virtual money.
+            </p>
+        </div>
+    </article>
+</section>
+
+@code {
+    private IReadOnlyList<DepositItem> _deposits = [];
+    private IReadOnlyList<DepositInterestItem> _interest = [];
+    private DepositItem? _selected;
+    private string _name = string.Empty;
+    private decimal _rate = 12m;
+    private int _term = 12;
+    private decimal _amount;
+    private string? _error;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        _deposits = await DepositService.GetDepositsAsync(userId);
+    }
+
+    private async Task OpenAsync()
+    {
+        _error = null;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result<DepositItem> result = await DepositService.OpenAsync(userId, _name, _rate, _term);
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("The deposit was opened.", "The deposit was opened.");
+
+        _name = string.Empty;
+
+        await ReloadAsync();
+    }
+
+    private async Task ContributeAsync()
+    {
+        _error = null;
+
+        if (_selected is null)
+        {
+            return;
+        }
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result<Money> result = await DepositService.ContributeAsync(userId, _selected.Id, _amount);
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("The money was moved into the deposit.", "The money was moved into the deposit.");
+
+        _amount = 0m;
+
+        await ReloadAsync();
+        await SelectAsync(_selected.Id);
+    }
+
+    private async Task WithdrawAsync()
+    {
+        _error = null;
+
+        if (_selected is null)
+        {
+            return;
+        }
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        Result<Money> result = await DepositService.WithdrawAsync(userId, _selected.Id, 0m);
+
+        if (result.IsFailure())
+        {
+            _error = result.Error;
+            return;
+        }
+
+        ToastService.Success("The money was taken back, the deposit was closed.", "The money was taken back, the deposit was closed.");
+
+        _selected = null;
+
+        await ReloadAsync();
+    }
+
+    private async Task SelectAsync(Guid depositId)
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        _selected = _deposits.FirstOrDefault(deposit => deposit.Id == depositId);
+        _interest = await DepositService.GetInterestHistoryAsync(userId, depositId);
+    }
+
+    private static string Describe(DepositStatus status) => status switch
+    {
+        DepositStatus.Active => "Active",
+        DepositStatus.Closed => "Closed",
+        _ => "Unknown"
+    };
+}

@@ -1,0 +1,39 @@
+@*
+    Shown when a list has no elements. It replaces an empty table with a helpful hint.
+*@
+
+<div class="empty-state">
+    <div class="empty-icon">
+        <AppIcon Name="@Icon" />
+    </div>
+
+    <h3 class="empty-title">@Title</h3>
+
+    @if (!string.IsNullOrWhiteSpace(Message))
+    {
+        <p class="empty-message">@Message</p>
+    }
+
+    @if (Action is not null)
+    {
+        <div class="empty-action">@Action</div>
+    }
+</div>
+
+@code {
+    /// <summary>The name of the icon.</summary>
+    [Parameter]
+    public string Icon { get; set; } = "info";
+
+    /// <summary>The headline of the empty state.</summary>
+    [Parameter]
+    public string Title { get; set; } = "Nothing here yet";
+
+    /// <summary>The optional explanation.</summary>
+    [Parameter]
+    public string? Message { get; set; }
+
+    /// <summary>The optional action button.</summary>
+    [Parameter]
+    public RenderFragment? Action { get; set; }
+}

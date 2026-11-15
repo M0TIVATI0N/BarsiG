@@ -1,0 +1,38 @@
+## .NET build output
+bin/
+obj/
+
+## Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+## Test results
+TestResults/
+*.trx
+coverage*.xml
+coverage*.json
+
+## Playwright
+tests/**/bin/Playwright/
+playwright-report/
+test-results/
+
+## Local database files
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+## OS
+Thumbs.db
+.DS_Store
+
+## The published output of the desktop application
+publish/
+
+## The local secrets of the demonstration
+appsettings.Development.local.json
+*.db
+local-demo-admin/

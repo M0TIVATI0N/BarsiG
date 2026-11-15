@@ -1,0 +1,353 @@
+@page "/register"
+@layout EmptyLayout
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Create an account · BarsiG</PageTitle>
+
+<div class="auth-shell">
+    <section class="auth-card">
+        <div class="auth-brand">
+            <img class="brand-logo" src="img/BarsiG_App_Icon.png" alt="BarsiG" />
+            <span class="brand-text">
+                <span class="brand-name">BarsiG</span>
+                <span class="brand-subtitle">Digital Banking Simulator</span>
+            </span>
+        </div>
+
+        <h1 class="auth-title">@(_challengeId is null ? "Create your account" : "Verify your phone")</h1>
+        <p class="auth-subtitle">@(_challengeId is null ? "Open your primary account of BarsiG and start the simulation." : "Enter the local demo code to activate phone sign-in.")</p>
+
+        @if (_challengeId is { } challengeId)
+        {
+            <div class="demo-note" role="status">
+                <strong>Demo verification — no SMS is sent.</strong>
+                <span>This educational code does not prove ownership of a real phone number.</span>
+                @if (!string.IsNullOrWhiteSpace(_demoCode))
+                {
+                    <p class="auth-title" aria-label="Local demo verification code">@_demoCode</p>
+                    <span>Expires at @_expiresAtUtc.ToLocalTime().ToString("HH:mm:ss"). Enter within five minutes.</span>
+                }
+                else
+                {
+                    <span>The code is not stored in the browser. Request a new demo code to continue.</span>
+                }
+            </div>
+            <div class="field">
+                <label class="field-label" for="phone-demo-code">Verification code</label>
+                <InputText id="phone-demo-code" class="input" @bind-Value="_verificationCode" inputmode="numeric" autocomplete="one-time-code" />
+            </div>
+            @if (_error is not null)
+            {
+                <div class="alert alert-error" role="alert">@_error</div>
+            }
+            <button type="button" class="btn btn-primary btn-block" disabled="@_busy" @onclick="VerifyPhoneAsync">
+                @(_busy ? "Verifying…" : "Verify and continue to sign in")
+            </button>
+            <button type="button" class="btn btn-ghost btn-block" disabled="@_busy" @onclick="ResendPhoneCodeAsync">
+                Request a new demo code
+            </button>
+        }
+        else
+        {
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="alert alert-error" role="alert">@_error</div>
+        }
+
+        <EditForm Model="Input" OnValidSubmit="RegisterAsync" FormName="register" class="form-stack">
+            <div class="field">
+                <label class="field-label" for="register-name">Name</label>
+                <InputText id="register-name" class="input" @bind-Value="Input.DisplayName" autocomplete="name" />
+                <ValidationMessage For="() => Input.DisplayName" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="register-email">E-mail address (optional)</label>
+                <InputText id="register-email" class="input" @bind-Value="Input.Email" autocomplete="username" />
+                <ValidationMessage For="() => Input.Email" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="register-phone">Kazakhstan mobile number (required)</label>
+                <InputText id="register-phone" class="input" type="tel" @bind-Value="Input.PhoneNumber" autocomplete="tel" inputmode="tel" placeholder="777 777 77 77" />
+                <ValidationMessage For="() => Input.PhoneNumber" />
+                <span class="muted">Enter 10 digits without + or 8. BarsiG adds +7 and asks you to verify the number before registration is complete.</span>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="register-password">Password</label>
+                <InputText id="register-password" class="input" type="password" @bind-Value="Input.Password" autocomplete="new-password" />
+                <ValidationMessage For="() => Input.Password" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="register-confirm">Repeat the password</label>
+                <InputText id="register-confirm" class="input" type="password" @bind-Value="Input.ConfirmPassword" autocomplete="new-password" />
+                <ValidationMessage For="() => Input.ConfirmPassword" />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block" disabled="@_busy">
+                @(_busy ? "Creating…" : "Create the account")
+            </button>
+        </EditForm>
+
+        <p class="auth-footer">
+            Already started phone verification?
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="() => _showRecovery = !_showRecovery">
+                @(_showRecovery ? "Hide recovery" : "Resume verification")
+            </button>
+        </p>
+        @if (_showRecovery)
+        {
+            <div class="form-stack" aria-label="Resume phone verification">
+                <p class="muted">Enter the same Kazakhstan phone number and password. An existing pending registration will resume without creating a second account.</p>
+                <div class="field">
+                    <label class="field-label" for="recover-phone">Phone number</label>
+                    <InputText id="recover-phone" class="input" @bind-Value="_recoveryPhone" autocomplete="tel" />
+                </div>
+                <div class="field">
+                    <label class="field-label" for="recover-password">Password</label>
+                    <InputText id="recover-password" class="input" type="password" @bind-Value="_recoveryPassword" autocomplete="current-password" />
+                </div>
+                <button type="button" class="btn btn-primary btn-block" disabled="@_busy" @onclick="RecoverPhoneRegistrationAsync">
+                    Resume and request demo code
+                </button>
+            </div>
+        }
+        }
+
+        <p class="auth-footer">
+            Already have an account? <a href="/login">Sign in</a>
+        </p>
+    </section>
+</div>
+
+@code {
+    private readonly RegisterInput _input = new();
+
+    private string? _error;
+    private bool _busy;
+    private Guid? _challengeId;
+    private string _demoCode = string.Empty;
+    private string _verificationCode = string.Empty;
+    private DateTimeOffset _expiresAtUtc;
+    private string _recoveryPhone = string.Empty;
+    private string _recoveryPassword = string.Empty;
+    private bool _showRecovery;
+
+    private RegisterInput Input => _input;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ResumeChallengeAsync();
+        }
+    }
+
+    private async Task ResumeChallengeAsync()
+    {
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>("financeFlow.resumePhoneChallenge");
+            if (!response.Ok)
+            {
+                return;
+            }
+
+            using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(response.Body);
+            if (!body.RootElement.TryGetProperty("pending", out System.Text.Json.JsonElement pending) ||
+                !pending.GetBoolean())
+            {
+                return;
+            }
+
+            _challengeId = body.RootElement.GetProperty("challengeId").GetGuid();
+            _expiresAtUtc = body.RootElement.GetProperty("expiresAtUtc").GetDateTimeOffset();
+            _demoCode = string.Empty;
+            bool expired = body.RootElement.GetProperty("expired").GetBoolean();
+            bool exhausted = body.RootElement.GetProperty("exhausted").GetBoolean();
+            _error = expired
+                ? "The previous demo code expired. Request a new demo code to continue."
+                : exhausted
+                    ? "The previous challenge reached its attempt limit. Request a new demo code."
+                    : "A pending verification was recovered. The previous code is not available; request a new demo code.";
+            StateHasChanged();
+        }
+        catch (JSException)
+        {
+            // Keep the ordinary registration and password-based recovery options available.
+        }
+    }
+
+    private async Task RegisterAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>(
+                "financeFlow.register",
+                Input.Email,
+                Input.DisplayName,
+                Input.Password,
+                Input.ConfirmPassword,
+                Input.PhoneNumber);
+
+            if (!response.Ok)
+            {
+                _error = "The account could not be created. Check the e-mail address or phone number and try again.";
+                return;
+            }
+
+            using (System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(response.Body))
+            {
+                if (body.RootElement.TryGetProperty("pendingVerification", out System.Text.Json.JsonElement pending) &&
+                    pending.GetBoolean())
+                {
+                    _challengeId = body.RootElement.GetProperty("challengeId").GetGuid();
+                    _demoCode = body.RootElement.GetProperty("demoCode").GetString() ?? string.Empty;
+                    _expiresAtUtc = body.RootElement.GetProperty("expiresAtUtc").GetDateTimeOffset();
+                    return;
+                }
+            }
+
+            Navigation.NavigateTo("/", forceLoad: true);
+        }
+        catch (JSException)
+        {
+            _error = "The server could not be reached. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task VerifyPhoneAsync()
+    {
+        if (_challengeId is not { } challengeId)
+        {
+            _error = "The verification challenge is no longer available. Start registration again.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>(
+                "financeFlow.verifyPhone",
+                challengeId,
+                _verificationCode);
+
+            if (!response.Ok)
+            {
+                try
+                {
+                    using System.Text.Json.JsonDocument error = System.Text.Json.JsonDocument.Parse(response.Body);
+                    _error = error.RootElement.TryGetProperty("error", out System.Text.Json.JsonElement message)
+                        ? message.GetString()
+                        : "The verification challenge could not be completed.";
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    _error = "The verification challenge could not be completed.";
+                }
+                return;
+            }
+
+            _demoCode = string.Empty;
+            Navigation.NavigateTo("/login?phoneVerified=demo", forceLoad: true);
+        }
+        catch (JSException)
+        {
+            _error = "The verification service could not be reached. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ResendPhoneCodeAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>("financeFlow.resendPhoneCode");
+            if (!response.Ok)
+            {
+                _error = ReadPhoneError(response.Body, "Please wait before requesting another demo code.");
+                return;
+            }
+
+            ApplyIssuedChallenge(response.Body);
+        }
+        catch (JSException)
+        {
+            _error = "The verification service could not be reached. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RecoverPhoneRegistrationAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            JsResponse response = await JS.InvokeAsync<JsResponse>(
+                "financeFlow.recoverPhoneRegistration",
+                _recoveryPhone,
+                _recoveryPassword);
+            if (!response.Ok)
+            {
+                _error = ReadPhoneError(response.Body, "The verification flow could not be resumed with these details.");
+                return;
+            }
+
+            ApplyIssuedChallenge(response.Body);
+            _recoveryPassword = string.Empty;
+            _showRecovery = false;
+        }
+        catch (JSException)
+        {
+            _error = "The verification service could not be reached. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ApplyIssuedChallenge(string responseBody)
+    {
+        using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(responseBody);
+        _challengeId = body.RootElement.GetProperty("challengeId").GetGuid();
+        _demoCode = body.RootElement.GetProperty("demoCode").GetString() ?? string.Empty;
+        _expiresAtUtc = body.RootElement.GetProperty("expiresAtUtc").GetDateTimeOffset();
+        _verificationCode = string.Empty;
+    }
+
+    private static string ReadPhoneError(string responseBody, string fallback)
+    {
+        try
+        {
+            using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(responseBody);
+            return body.RootElement.TryGetProperty("error", out System.Text.Json.JsonElement error)
+                ? error.GetString() ?? fallback
+                : fallback;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return fallback;
+        }
+    }
+}

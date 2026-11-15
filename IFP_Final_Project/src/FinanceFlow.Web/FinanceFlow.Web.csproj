@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>financeflow-9a4d2b7c-0f2e-4c8b-9a1d-7f2b6e5c4d31</UserSecretsId>
+    <RootNamespace>FinanceFlow.Web</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FinanceFlow.Application\FinanceFlow.Application.csproj" />
+    <ProjectReference Include="..\FinanceFlow.Infrastructure\FinanceFlow.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

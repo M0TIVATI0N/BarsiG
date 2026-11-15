@@ -1,0 +1,109 @@
+﻿@*
+    The navigation of the application. The active item is highlighted with the NavLink component.
+    The items are grouped, so the customer finds the banking functions and the planning
+    functions of the personal finance without a long list.
+*@
+
+<nav class="nav-menu" @onclick="CloseOnMobile">
+    <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
+        <AppIcon Name="home" />
+        <span>Dashboard</span>
+    </NavLink>
+
+    <p class="nav-section">Banking</p>
+
+    <NavLink class="nav-item" href="accounts">
+        <AppIcon Name="bank" />
+        <span>Accounts</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="transfers">
+        <AppIcon Name="send" />
+        <span>Transfers</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="deposits">
+        <AppIcon Name="vault" />
+        <span>Deposits</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="cards">
+        <AppIcon Name="card" />
+        <span>Virtual cards</span>
+    </NavLink>
+
+    <p class="nav-section">Planning</p>
+
+    <NavLink class="nav-item" href="transactions">
+        <AppIcon Name="list" />
+        <span>Transactions</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="categories">
+        <AppIcon Name="tag" />
+        <span>Categories</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="budgets">
+        <AppIcon Name="wallet" />
+        <span>Budgets</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="goals">
+        <AppIcon Name="target" />
+        <span>Savings goals</span>
+    </NavLink>
+
+    <p class="nav-section">Analytics</p>
+
+    <NavLink class="nav-item" href="analytics">
+        <AppIcon Name="chart" />
+        <span>Analytics</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="forecast">
+        <AppIcon Name="trend" />
+        <span>Forecast</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="insights">
+        <AppIcon Name="bulb" />
+        <span>Smart insights</span>
+    </NavLink>
+
+    <p class="nav-section">Account</p>
+
+    <NavLink class="nav-item" href="security">
+        <AppIcon Name="shield" />
+        <span>Security</span>
+    </NavLink>
+
+    <NavLink class="nav-item" href="export">
+        <AppIcon Name="download" />
+        <span>Export</span>
+    </NavLink>
+
+    @if (IsAdmin)
+    {
+        <p class="nav-section">Demo Bank</p>
+
+        <NavLink class="nav-item" href="admin">
+            <AppIcon Name="briefcase" />
+            <span>Administration</span>
+        </NavLink>
+    }
+</nav>
+
+@code {
+    /// <summary>Raised after a link was activated, so the mobile menu can close itself.</summary>
+    [Parameter]
+    public EventCallback OnNavigated { get; set; }
+
+    /// <summary>The session of the signed in customer.</summary>
+    [CascadingParameter]
+    public SessionInfo? Session { get; set; }
+
+    private bool IsAdmin => Session?.IsAdmin ?? false;
+
+    private Task CloseOnMobile() => OnNavigated.InvokeAsync();
+}

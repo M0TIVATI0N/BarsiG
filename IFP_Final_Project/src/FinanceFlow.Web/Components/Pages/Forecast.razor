@@ -1,0 +1,162 @@
+@page "/forecast"
+@attribute [Authorize]
+@inject ForecastingService ForecastingService
+@inject UserContext UserContext
+
+<PageTitle>Forecast · BarsiG</PageTitle>
+
+<PageHeader Title="Forecast" Subtitle="How the expenses of the next months may look like." />
+
+@if (_report is null)
+{
+    <div class="page-loading">
+        <div class="spinner"></div>
+    </div>
+}
+else if (_report.LinearTrend.Points.Count == 0)
+{
+    <EmptyState Icon="trend" Title="Not enough data for a forecast"
+                Message="Record a few months of expenses and the forecast will appear here." />
+}
+else
+{
+    <section class="stat-grid">
+        <StatCard Label="Next month" Value="@Money.FromDecimal(_report.LinearTrend.PredictedNextMonth).Format()" Icon="trend" Accent="var(--info)"
+                  Hint="The prediction of the linear trend" />
+
+        <StatCard Label="Trend per month" Value="@Money.FromDecimal(_report.LinearTrend.TrendPerMonth).Format()" Icon="chart" Accent="var(--danger)"
+                  Hint="@(_report.LinearTrend.TrendPerMonth >= 0 ? "The expenses are growing" : "The expenses are shrinking")" />
+
+        <StatCard Label="Confidence" Value="@($"{_report.LinearTrend.Confidence:P0}")" Icon="target" Accent="var(--accent)"
+                  Hint="How well the history fits the trend" />
+
+        <StatCard Label="Monthly average" Value="@Money.FromDecimal(_report.LinearTrend.MonthlyAverage).Format()" Icon="clock" Accent="var(--success)"
+                  Hint="The average of the recorded months" />
+    </section>
+
+    <section class="card">
+        <header class="card-header">
+            <h2 class="card-title">History and prediction</h2>
+            <span class="card-hint">The history and the prediction in one line</span>
+        </header>
+
+        <LineChart Values="@CombinedValues()"
+                   Labels="@CombinedLabels()"
+                   Color="var(--info)"
+                   Height="280"
+                   AriaLabel="The history and the predicted expenses" />
+    </section>
+
+    <section class="grid-2">
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">Linear trend</h2>
+                <span class="card-hint">Method: @_report.LinearTrend.Method</span>
+            </header>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th class="text-right">Prediction</th>
+                            <th class="text-right">Lower bound</th>
+                            <th class="text-right">Upper bound</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (ForecastPoint point in _report.LinearTrend.Points)
+                        {
+                            <tr>
+                                <td>@point.Month</td>
+                                <td class="text-right">@Money.FromDecimal(point.Predicted).Format()</td>
+                                <td class="text-right muted">@Money.FromDecimal(point.Lower).Format()</td>
+                                <td class="text-right muted">@Money.FromDecimal(point.Upper).Format()</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="card">
+            <header class="card-header">
+                <h2 class="card-title">Moving average</h2>
+                <span class="card-hint">Method: @_report.MovingAverage.Method</span>
+            </header>
+
+            <p class="muted">
+                The moving average is a more cautious method: it predicts the average of the
+                last months and therefore reacts slower to a sudden change.
+            </p>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th class="text-right">Prediction</th>
+                            <th class="text-right">Range</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (ForecastPoint point in _report.MovingAverage.Points)
+                        {
+                            <tr>
+                                <td>@point.Month</td>
+                                <td class="text-right">@Money.FromDecimal(point.Predicted).Format()</td>
+                                <td class="text-right muted">@Money.FromDecimal(point.Lower).Format() – @Money.FromDecimal(point.Upper).Format()</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    </section>
+}
+
+@code {
+    private ForecastReport? _report;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        _report = await ForecastingService.GetAsync(userId);
+    }
+
+    private List<double> CombinedValues()
+    {
+        List<double> values = [];
+
+        if (_report is null)
+        {
+            return values;
+        }
+
+        values.AddRange(HistoryValues());
+        values.AddRange(_report.LinearTrend.Points.Select(point => (double)point.Predicted));
+
+        return values;
+    }
+
+    private List<double> HistoryValues() =>
+        (_report?.History ?? [])
+            .Select(point => (double)point.Expense.ToDecimal())
+            .ToList();
+
+    private List<string> CombinedLabels()
+    {
+        List<string> labels = [];
+
+        if (_report is null)
+        {
+            return labels;
+        }
+
+        labels.AddRange(_report.History.Select(point => point.Month));
+        labels.AddRange(_report.LinearTrend.Points.Select(point => point.Month));
+
+        return labels;
+    }
+}

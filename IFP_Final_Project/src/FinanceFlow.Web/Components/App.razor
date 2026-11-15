@@ -1,0 +1,29 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F4EFE6" />
+    <meta name="description" content="BarsiG is a digital banking simulator built with Blazor and .NET. All money is virtual." />
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["FinanceFlow.Web.styles.css"]" />
+    <link rel="stylesheet" href="@Assets["v3-reference.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="img/BarsiG_App_Icon.png" />
+    <link rel="apple-touch-icon" href="img/BarsiG_App_Icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["lib/signalr/signalr.min.js"]"></script>
+    <script src="@Assets["js/financeflow.js"]"></script>
+</body>
+
+</html>

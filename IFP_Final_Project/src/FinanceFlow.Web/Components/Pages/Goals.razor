@@ -1,0 +1,245 @@
+@page "/goals"
+@attribute [Authorize]
+@implements IDisposable
+@using System.Globalization
+@inject SavingsGoalService SavingsGoalService
+@inject UserContext UserContext
+@inject ToastService ToastService
+@inject RealtimeService Realtime
+
+<PageTitle>Savings goals · BarsiG</PageTitle>
+
+<PageHeader Title="Savings goals" Subtitle="The plans that give your money a direction." />
+
+<section class="grid-2">
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">New goal</h2>
+        </header>
+
+        <EditForm Model="_form" OnValidSubmit="CreateAsync" class="form-stack">
+            <div class="field">
+                <label class="field-label" for="goal-title">Title</label>
+                <InputText id="goal-title" class="input" @bind-Value="_form.Title" placeholder="Emergency fund" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="goal-amount">Target amount</label>
+                <InputNumber id="goal-amount" class="input" @bind-Value="_form.TargetAmount" step="1000" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="goal-date">Target date</label>
+                <InputDate id="goal-date" class="input" @bind-Value="_form.TargetDate" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="goal-note">Note</label>
+                <InputText id="goal-note" class="input" @bind-Value="_form.Note" placeholder="Optional" />
+            </div>
+
+            @if (_error is not null)
+            {
+                <span class="field-error">@_error</span>
+            }
+
+            <div class="editor-actions">
+                <button type="submit" class="btn btn-primary">Create the goal</button>
+            </div>
+        </EditForm>
+    </article>
+
+    <article class="card">
+        <header class="card-header">
+            <h2 class="card-title">Your goals</h2>
+            <span class="card-hint">@_goals.Count goals</span>
+        </header>
+
+        @if (_goals.Count == 0)
+        {
+            <EmptyState Icon="target" Title="No goals yet" Message="Create the first one on the left." />
+        }
+        else
+        {
+            <ul class="goal-list">
+                @foreach (GoalItem goal in _goals)
+                {
+                    <li class="goal-card">
+                        <div class="goal-head">
+                            <span class="goal-title">@goal.Title</span>
+                            <span class="goal-status goal-status-@goal.Status.ToString().ToLowerInvariant()">@goal.Status</span>
+                        </div>
+
+                        <ProgressBar Value="@goal.Ratio" Color="@(goal.Status == GoalStatus.Completed ? "var(--success)" : "var(--accent)")"
+                                     ValueText="@($"{goal.Ratio:P0}")" />
+
+                        <div class="goal-meta">
+                            <span>@goal.Saved.Format() of @goal.Target.Format()</span>
+                            @if (goal.DaysLeft is { } days)
+                            {
+                                <span>· @(days >= 0 ? $"{days} days left" : "the date has passed")</span>
+                            }
+                        </div>
+
+                        @if (goal.Status == GoalStatus.Active)
+                        {
+                            <div class="goal-actions">
+                                <input class="input input-sm" type="number" step="100" min="1"
+                                       aria-label="Contribution amount for @goal.Title"
+                                       placeholder="Amount" value="@GetContribution(goal.Id)"
+                                       @onchange="args => SetContribution(goal.Id, args)" />
+                                <button type="button" class="btn btn-primary btn-sm" @onclick="() => ContributeAsync(goal)">
+                                    Add
+                                </button>
+                                <button type="button" class="icon-btn icon-danger" title="Delete"
+                                        aria-label="Delete goal @goal.Title" @onclick="() => AskDelete(goal)">
+                                    <AppIcon Name="trash" />
+                                </button>
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </article>
+</section>
+
+<ConfirmDialog Visible="@(_deleteTarget is not null)"
+               Title="Delete the goal?"
+               Message="@($"The goal {_deleteTarget?.Title} will be removed.")"
+               ConfirmText="Delete"
+               OnConfirm="ConfirmDeleteAsync"
+               OnCancel="CancelDelete" />
+
+@code {
+    private sealed class GoalForm
+    {
+        public string Title { get; set; } = string.Empty;
+
+        public decimal TargetAmount { get; set; } = 100_000m;
+
+        public DateOnly? TargetDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow).AddMonths(6);
+
+        public string? Note { get; set; }
+    }
+
+    private GoalForm _form = new();
+    private IReadOnlyList<GoalItem> _goals = [];
+    private readonly Dictionary<Guid, decimal> _contributions = [];
+    private GoalItem? _deleteTarget;
+    private string? _error;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Realtime.DataChanged += OnDataChangedAsync;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        _goals = await SavingsGoalService.GetAllAsync(userId);
+    }
+
+    private async Task CreateAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        var draft = new GoalDraft(
+            userId,
+            _form.Title,
+            _form.TargetAmount,
+            _form.TargetDate,
+            _form.Note);
+
+        Result<GoalItem> result = await SavingsGoalService.CreateAsync(userId, draft);
+
+        if (result is not Ok<GoalItem> ok)
+        {
+            _error = result.Error;
+            return;
+        }
+
+        _error = null;
+        ToastService.Success("Goal created", ok.Value.Title);
+
+        _form = new GoalForm();
+        await LoadAsync();
+    }
+
+    private async Task ContributeAsync(GoalItem goal)
+    {
+        if (!_contributions.TryGetValue(goal.Id, out decimal amount) || amount <= 0m)
+        {
+            ToastService.Error("Enter an amount", "The contribution must be greater than zero.");
+            return;
+        }
+
+        Guid userId = await UserContext.GetUserIdAsync();
+        Result<GoalItem> result = await SavingsGoalService.ContributeAsync(userId, goal.Id, amount);
+
+        if (result is not Ok<GoalItem> ok)
+        {
+            ToastService.Error("Could not add the money", result.Error);
+            return;
+        }
+
+        _contributions.Remove(goal.Id);
+        ToastService.Success("Money added", $"{ok.Value.Title}: {ok.Value.Saved.Format()}");
+        await LoadAsync();
+    }
+
+    private void AskDelete(GoalItem goal) => _deleteTarget = goal;
+
+    private string GetContribution(Guid goalId) =>
+        _contributions.TryGetValue(goalId, out decimal amount)
+            ? amount.ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
+
+    private void SetContribution(Guid goalId, ChangeEventArgs args)
+    {
+        string? text = args.Value?.ToString();
+
+        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal amount) && amount > 0m)
+        {
+            _contributions[goalId] = amount;
+        }
+        else
+        {
+            _contributions.Remove(goalId);
+        }
+    }
+
+    private void CancelDelete() => _deleteTarget = null;
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is { } target)
+        {
+            Guid userId = await UserContext.GetUserIdAsync();
+            await SavingsGoalService.DeleteAsync(userId, target.Id);
+            ToastService.Success("Goal deleted", target.Title);
+        }
+
+        _deleteTarget = null;
+        await LoadAsync();
+    }
+
+    private async Task OnDataChangedAsync(string entity, string action)
+    {
+        if (entity != "goals")
+        {
+            return;
+        }
+
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Realtime.DataChanged -= OnDataChangedAsync;
+    }
+}

@@ -1,0 +1,282 @@
+@page "/transactions"
+@attribute [Authorize]
+@implements IDisposable
+@inject TransactionService TransactionService
+@inject CategoryService CategoryService
+@inject UserContext UserContext
+@inject ToastService ToastService
+@inject RealtimeService Realtime
+
+<PageTitle>Transactions · BarsiG</PageTitle>
+
+<PageHeader Title="Transactions" Subtitle="Every income and expense of your account.">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="StartCreate">
+            <AppIcon Name="plus" />
+            <span>Add a transaction</span>
+        </button>
+    </Actions>
+</PageHeader>
+
+<TransactionEditor Visible="@_editorVisible"
+                  Transaction="@_editing"
+                  Categories="@_categories"
+                  OnSaved="OnSavedAsync"
+                  OnCancelled="CloseEditor" />
+
+<section class="card">
+    <div class="filter-bar">
+        <div class="field field-inline">
+            <label class="field-label" for="filter-search">Search</label>
+            <input id="filter-search" class="input" type="search" placeholder="Category or note"
+                   value="@_filter.Search" @oninput="OnSearchChanged" />
+        </div>
+
+        <div class="field field-inline">
+            <label class="field-label" for="filter-kind">Type</label>
+            <select id="filter-kind" class="input" value="@(_filter.Kind?.ToString() ?? "all")" @onchange="OnKindChanged">
+                <option value="all">All</option>
+                <option value="Expense">Expenses</option>
+                <option value="Income">Income</option>
+            </select>
+        </div>
+
+        <div class="field field-inline">
+            <label class="field-label" for="filter-category">Category</label>
+            <select id="filter-category" class="input" value="@(_filter.CategoryId?.ToString() ?? "all")" @onchange="OnCategoryChanged">
+                <option value="all">All</option>
+                @foreach (CategoryItem category in _categories)
+                {
+                    <option value="@category.Id">@category.Name</option>
+                }
+            </select>
+        </div>
+
+        @if (_filter.Kind is not null || _filter.CategoryId is not null || !string.IsNullOrWhiteSpace(_filter.Search))
+        {
+            <button type="button" class="btn btn-ghost btn-sm" @onclick="ResetFilters">Reset</button>
+        }
+    </div>
+
+    @if (_result is null)
+    {
+        <div class="page-loading">
+            <div class="spinner"></div>
+        </div>
+    }
+    else if (_result.Items.Count == 0)
+    {
+        <EmptyState Icon="list" Title="No transactions found"
+                    Message="Change the filter or add a new transaction.">
+            <Action>
+                <button type="button" class="btn btn-primary" @onclick="StartCreate">Add a transaction</button>
+            </Action>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Category</th>
+                        <th>Note</th>
+                        <th class="text-right">Amount</th>
+                        <th class="text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (TransactionItem item in _result.Items)
+                    {
+                        <tr>
+                            <td class="text-nowrap">@item.OccurredOn.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)</td>
+                            <td><CategoryBadge Name="@item.CategoryName" Color="@item.ColorHex" Icon="@item.Icon" /></td>
+                            <td class="muted">@(string.IsNullOrWhiteSpace(item.Note) ? "—" : item.Note)</td>
+                            <td class="text-right"><MoneyText Amount="@item.Amount" Kind="@item.Kind" /></td>
+                            <td class="text-right actions-cell">
+                                <button type="button" class="icon-btn" title="Edit" @onclick="() => StartEdit(item)">
+                                    <AppIcon Name="edit" />
+                                </button>
+                                <button type="button" class="icon-btn icon-danger" title="Delete" @onclick="() => AskDelete(item)">
+                                    <AppIcon Name="trash" />
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pager">
+            <span class="muted">@_result.TotalCount transactions · page @_result.Page of @TotalPages</span>
+
+            <div class="pager-buttons">
+                <button type="button" class="btn btn-ghost btn-sm" disabled="@(_result.Page <= 1)" @onclick="GoPreviousPage">
+                    Previous
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm" disabled="@(_result.Page >= TotalPages)" @onclick="GoNextPage">
+                    Next
+                </button>
+            </div>
+        </div>
+    }
+</section>
+
+<ConfirmDialog Visible="@(_deleteTarget is not null)"
+               Title="Delete the transaction?"
+               Message="@($"The transaction of {_deleteTarget?.CategoryName} will be removed permanently.")"
+               ConfirmText="Delete"
+               OnConfirm="ConfirmDeleteAsync"
+               OnCancel="CancelDelete" />
+
+@code {
+    private const int PageSize = 8;
+
+    private PagedResult<TransactionItem>? _result;
+    private IReadOnlyList<CategoryItem> _categories = [];
+    private TransactionFilter _filter = new();
+    private bool _editorVisible;
+    private TransactionItem? _editing;
+    private TransactionItem? _deleteTarget;
+
+    private int TotalPages => _result is null || _result.TotalCount == 0
+        ? 1
+        : (int)Math.Ceiling(_result.TotalCount / (double)PageSize);
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        Realtime.DataChanged += OnDataChangedAsync;
+
+        Guid userId = await UserContext.GetUserIdAsync();
+
+        _categories = await CategoryService.GetAllAsync(userId);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        Guid userId = await UserContext.GetUserIdAsync();
+        _result = await TransactionService.GetListAsync(userId, _filter with { PageSize = PageSize });
+    }
+
+    private void StartCreate()
+    {
+        _editing = null;
+        _editorVisible = true;
+    }
+
+    private void StartEdit(TransactionItem item)
+    {
+        _editing = item;
+        _editorVisible = true;
+    }
+
+    private void CloseEditor()
+    {
+        _editorVisible = false;
+        _editing = null;
+    }
+
+    private async Task OnSavedAsync()
+    {
+        CloseEditor();
+        await LoadAsync();
+    }
+
+    private void AskDelete(TransactionItem item) => _deleteTarget = item;
+
+    private void CancelDelete() => _deleteTarget = null;
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is { } target)
+        {
+            Guid userId = await UserContext.GetUserIdAsync();
+            Result result = await TransactionService.DeleteAsync(userId, target.Id);
+
+            if (result is Result.Failure failure)
+            {
+                ToastService.Error("Could not delete", failure.Error);
+            }
+            else
+            {
+                ToastService.Success("Transaction deleted", $"{target.CategoryName}: {target.Amount.Format()}");
+            }
+        }
+
+        _deleteTarget = null;
+        await LoadAsync();
+    }
+
+    private async Task OnSearchChanged(ChangeEventArgs args)
+    {
+        _filter = _filter with { Search = args.Value?.ToString(), Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task OnKindChanged(ChangeEventArgs args)
+    {
+        string value = args.Value?.ToString() ?? "all";
+        TransactionKind? kind = value switch
+        {
+            "Income" => TransactionKind.Income,
+            "Expense" => TransactionKind.Expense,
+            _ => null
+        };
+
+        _filter = _filter with { Kind = kind, Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task OnCategoryChanged(ChangeEventArgs args)
+    {
+        string value = args.Value?.ToString() ?? "all";
+        Guid? categoryId = Guid.TryParse(value, out Guid parsed) ? parsed : null;
+
+        _filter = _filter with { CategoryId = categoryId, Page = 1 };
+        await LoadAsync();
+    }
+
+    private async Task ResetFilters()
+    {
+        _filter = new TransactionFilter();
+        await LoadAsync();
+    }
+
+    private async Task GoPreviousPage()
+    {
+        if (_filter.Page > 1)
+        {
+            _filter = _filter with { Page = _filter.Page - 1 };
+            await LoadAsync();
+        }
+    }
+
+    private async Task GoNextPage()
+    {
+        if (_filter.Page < TotalPages)
+        {
+            _filter = _filter with { Page = _filter.Page + 1 };
+            await LoadAsync();
+        }
+    }
+
+    private async Task OnDataChangedAsync(string entity, string action)
+    {
+        if (entity != "transactions")
+        {
+            return;
+        }
+
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Realtime.DataChanged -= OnDataChangedAsync;
+    }
+}

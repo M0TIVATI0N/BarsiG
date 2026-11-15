@@ -1,0 +1,92 @@
+@*
+    A small control that lets the user move between the months.
+*@
+@using System.Globalization
+
+<div class="month-picker">
+    <button type="button" class="icon-btn" title="Previous month" aria-label="Previous month"
+            disabled="@(!CanGoPrevious)" @onclick="GoPrevious">
+        <AppIcon Name="trend" CssClass="icon-rotate-90" />
+    </button>
+
+    <span class="month-picker-label">@Label</span>
+
+    <button type="button" class="icon-btn" title="Next month" aria-label="Next month"
+            disabled="@(!CanGoNext)" @onclick="GoNext">
+        <AppIcon Name="trend" CssClass="icon-rotate--90" />
+    </button>
+</div>
+
+@code {
+    /// <summary>The year that is shown.</summary>
+    [Parameter]
+    public int Year { get; set; }
+
+    /// <summary>The month that is shown.</summary>
+    [Parameter]
+    public int Month { get; set; }
+
+    /// <summary>The earliest month the user can select.</summary>
+    [Parameter]
+    public DateOnly? Minimum { get; set; }
+
+    /// <summary>The latest month the user can select.</summary>
+    [Parameter]
+    public DateOnly? Maximum { get; set; }
+
+    /// <summary>Raised when the user selects another month.</summary>
+    [Parameter]
+    public EventCallback<(int Year, int Month)> MonthChanged { get; set; }
+
+    private string Label => new DateOnly(Year, Month, 1).ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+
+    private bool CanGoPrevious
+    {
+        get
+        {
+            if (Minimum is null)
+            {
+                return true;
+            }
+
+            DateOnly current = new(Year, Month, 1);
+            return current.AddMonths(-1) >= Minimum.Value;
+        }
+    }
+
+    private bool CanGoNext
+    {
+        get
+        {
+            if (Maximum is null)
+            {
+                return true;
+            }
+
+            DateOnly current = new(Year, Month, 1);
+            return current.AddMonths(1) <= Maximum.Value;
+        }
+    }
+
+    private Task GoPrevious()
+    {
+        if (!CanGoPrevious)
+        {
+            return Task.CompletedTask;
+        }
+
+        DateOnly previous = new DateOnly(Year, Month, 1).AddMonths(-1);
+        return MonthChanged.InvokeAsync((previous.Year, previous.Month));
+    }
+
+    private Task GoNext()
+    {
+        if (!CanGoNext)
+        {
+            return Task.CompletedTask;
+        }
+
+        DateOnly next = new DateOnly(Year, Month, 1).AddMonths(1);
+        return MonthChanged.InvokeAsync((next.Year, next.Month));
+    }
+}
